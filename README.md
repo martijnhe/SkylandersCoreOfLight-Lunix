@@ -25,6 +25,13 @@ discs, keeps them up to date and holds your figures, saves and achievements in o
 It's made for a controller, like a console's dashboard: pick a game, press **A**, and when the game
 asks for a Skylander, the portal menu opens by itself.
 
+**What it does:**
+
+- **Your real portal and figures work**, as on the console: plug in a Portal of Power and the games read your figures and save their progress on them. No figures? The portal menu holds every one, and both work together too.
+- **Sharper and smoother than the console:** up to 3x the console's 720p, 60 FPS and more, a settings menu in every game. On a Ryzen 5 5600 with a Radeon RX 6800 XT (32 GB RAM, Windows 11) all six hold 60 FPS at 2x (1440p); without the cap their hubs run at 87 to 142 FPS at 2x.
+- **Native Windows ports, not an emulator:** the games' code is recompiled for the PC. No game data comes with it; the launcher takes it from your own Xbox 360 discs.
+- **Everything in one place:** your figures, saves and achievements, with older versions to go back to.
+
 > Unofficial fan project. Not affiliated with or endorsed by Activision, Toys for Bob or Vicarious
 > Visions. It ships no game data and no artwork: the pictures, texts and music it shows come from
 > your own discs.
@@ -196,6 +203,10 @@ is.
 text file to your desktop with the latest logs and settings of every game, your Windows user name
 taken out. Open an [issue](https://github.com/tsapZ/SkylandersCoreOfLight/issues/new/choose) and
 drag that file in. After a crash the launcher offers it by itself.
+
+**Can I use my real portal and figures?** Yes. In a game's settings (or its F4 menu), Portal > *USB only* uses the real portal alone, *Both* uses it together with the portal menu and keeps a backup of every figure you put on. The PS3, Wii and PC portals work as they are; an Xbox 360 portal needs the WinUSB driver (Zadig), as for Xenia.
+
+**Does my Wii or PS3 copy work?** No: these are the Xbox 360 games, set up from your own Xbox 360 discs (each game's page says which disc).
 
 **Does it run on Linux?** Yes: there is a native Linux launcher, also for the Steam Deck
 (`CoreOfLight-linux-x86_64-<version>.zip`, see `installer/linux/README-linux.txt`). It sets up the

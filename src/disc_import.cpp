@@ -74,6 +74,9 @@ bool DiscImport::PickIso(fs::path& iso, bool german) {
     dialog->SetFileTypes(2, filters);
     dialog->SetTitle(german ? L"Eigene Skylanders-Disc (Xbox 360, ISO) wählen"
                             : NLW(L"Choose your own Skylanders disc (Xbox 360, ISO)"));
+    // Windows' dialog runs other programs' shell extensions inside the launcher: a crash in there
+    // then follows this line.
+    HubLog("disc import: choosing a disc (Windows file dialog)");
     IShellItem* item = nullptr;
     if (SUCCEEDED(dialog->Show(GetActiveWindow())) && SUCCEEDED(dialog->GetResult(&item))) {
       PWSTR path = nullptr;
@@ -100,6 +103,7 @@ bool DiscImport::PickFolder(fs::path& folder, bool german) {
     dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
     dialog->SetTitle(german ? L"Ordner mit der entpackten Disc (mit default.xex) w\u00e4hlen"
                             : NLW(L"Choose the folder with the unpacked disc (with default.xex)"));
+    HubLog("disc import: choosing a folder (Windows file dialog)");
     IShellItem* item = nullptr;
     if (SUCCEEDED(dialog->Show(GetActiveWindow())) && SUCCEEDED(dialog->GetResult(&item))) {
       PWSTR path = nullptr;
@@ -190,7 +194,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       image = XisoImage::Open(iso);
       if (!image && IsPs3Disc(iso)) {
         say(german ? "Das ist eine PS3-Disc. Die Spiele brauchen ihre Xbox-360-Disc; eine PS3-Disc hilft nur "
-                     "Imaginators, f\xC3\xBCr seine Sprachen (Einstellungen des Hubs > Imaginators-Sprache)."
+                     "Imaginators, f\xC3\xBCr seine Sprachen (Einstellungen von Core of Light > Imaginators-Sprache)."
                    : NL("That's a PS3 disc. The games need their Xbox 360 disc; a PS3 disc only helps Imaginators, "
                      "for its languages (Launcher settings > Imaginators language)."),
             Phase::kFailed);

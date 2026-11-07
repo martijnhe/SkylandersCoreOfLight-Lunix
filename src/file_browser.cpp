@@ -300,15 +300,21 @@ void FileBrowser::Draw(float width, float height) {
     const int folders = search_->folders.load(), isos = search_->isos.load();
     const int discs = int(entries_.size());
     char status[200];
+    // "1 Ordner", "2 ISO-Dateien": the right word for the number, no "Disc(s)".
+    auto count = [](int n, const char* one, const char* many) {
+      return n == 1 ? std::string("1 ") + one : std::to_string(n) + " " + many;
+    };
     if (!search_->done) {
       std::snprintf(status, sizeof(status),
-                    german_ ? "Suche Discs ... %d Ordner, %d ISO-Dateien angesehen" : NL("Looking for discs ... %d folders, %d ISO files seen"),
-                    folders, isos);
+                    german_ ? "Suche nach Discs ... %d Ordner und %s durchsucht" : NL("Looking for discs ... %d folders and %s searched"),
+                    folders, (german_ ? count(isos, "ISO-Datei", "ISO-Dateien") : count(isos, NL("ISO file"), NL("ISO files"))).c_str());
     } else {
-      std::snprintf(status, sizeof(status),
-                    german_ ? "Fertig: %d Skylanders-Disc(s) unter %d ISO-Dateien in %d Ordnern"
-                            : NL("Done: %d Skylanders disc(s) among %d ISO files in %d folders"),
-                    discs, isos, folders);
+      const std::string found = german_ ? (discs ? count(discs, "Skylanders-Disc", "Skylanders-Discs") : "keine Skylanders-Disc")
+                                        : (discs ? count(discs, NL("Skylanders disc"), NL("Skylanders discs")) : NL("no Skylanders disc"));
+      const std::string seen = german_ ? count(isos, "ISO-Datei", "ISO-Dateien") + " in " + count(folders, "Ordner", "Ordnern")
+                                       : count(isos, NL("ISO file"), NL("ISO files")) + NL(" in ") + count(folders, NL("folder"), NL("folders"));
+      std::snprintf(status, sizeof(status), german_ ? "Fertig: %s gefunden, %s durchsucht" : NL("Done: found %s, searched %s"),
+                    found.c_str(), seen.c_str());
     }
     where = status;
   }

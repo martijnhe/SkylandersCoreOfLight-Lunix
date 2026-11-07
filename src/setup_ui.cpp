@@ -421,8 +421,8 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
                     german_ ? "A auf einem Spiel: seine ISO w\xC3\xA4hlen. Die anderen sucht Core of Light dann im selben Ordner."
                             : NL("A on a game: choose its ISO. Core of Light then looks for the others in the same folder."));
     } else if (done && nearby_) {
-      std::snprintf(text, sizeof(text), german_ ? "Daneben gesucht: %d von 6 Spielen zugeordnet. Stimmt eines nicht: A darauf, andere ISO w\xC3\xA4hlen."
-                                                : NL("Looked next to it: %d of 6 games filled in. One wrong: A on it, another ISO."),
+      std::snprintf(text, sizeof(text), german_ ? "Im selben Ordner gesucht: %d von 6 Spielen zugeordnet. Stimmt eines nicht, w\xC3\xA4hlt A darauf eine andere ISO."
+                                                : NL("Searched the same folder: %d of 6 games filled in. If one is wrong, A on it picks another ISO."),
                     games);
     } else if (done) {
       std::snprintf(text, sizeof(text), german_ ? "Suche fertig: %d ISOs, %d von 6 Spielen gefunden"
@@ -704,10 +704,13 @@ void SetupScreen::DrawWork(float width, float height, const Launcher& launcher) 
   const float hy = height - 52 * u;
   if (done) {
     char text[160];
-    std::snprintf(text, sizeof(text),
-                  german_ ? "%d Spiel(e) bereit%s. A: zu den Spielen" : NL("%d game(s) ready%s. A: to the games"), ok,
-                  failed ? (german_ ? ", bei den roten hat es nicht geklappt (Karte: A versucht es noch einmal)"
-                                    : NL(", the red ones failed (their card's A tries again)"))
+    const char* ready = german_ ? (ok == 1 ? "1 Spiel ist bereit" : ok ? "%d Spiele sind bereit" : "Kein Spiel ist bereit")
+                                : (ok == 1 ? NL("1 game is ready") : ok ? NL("%d games are ready") : NL("No game is ready"));
+    char first[64];
+    std::snprintf(first, sizeof(first), ready, ok);
+    std::snprintf(text, sizeof(text), german_ ? "%s%s. A: zu den Spielen" : NL("%s%s. A: to the games"), first,
+                  failed ? (german_ ? "; bei den roten hat es nicht geklappt, A auf ihrer Karte versucht es noch einmal"
+                                    : NL("; the red ones failed, A on their card tries again"))
                          : "");
     Text(dl, bold_, 22 * u, {left, y + 16 * u}, ok ? kGreen : kDim, text, right);
     if (Accept() || Back()) {

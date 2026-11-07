@@ -88,8 +88,19 @@ void SettingsScreen::Open(const std::string& title, SettingsLoader* loader, std:
   row_ = scroll_ = 0;
   wheel_ = 0.0f;
   changes_.clear();
+  original_.clear();
   confirm_discard_ = false;
   message_.clear();
+}
+
+void SettingsScreen::NoteChange(const std::string& cvar, const std::string& category, const std::string& type,
+                                const std::string& value) {
+  const auto original = original_.find(cvar);
+  if (original != original_.end() && SameValue(original->second, value)) {
+    changes_.erase(cvar);
+  } else {
+    changes_[cvar] = {category, type, value};
+  }
 }
 
 std::map<std::string, std::string> SettingsScreen::TakeSaved() { return std::exchange(saved_, {}); }
@@ -173,7 +184,7 @@ void SettingsScreen::Step(int step) {
   s.value = next;
   auto set = [&](const std::string& cvar, const std::string& value, const std::string& category,
                  const std::string& type) {
-    changes_[cvar] = {category, type, value};
+    NoteChange(cvar, category, type, value);
     // The same setting elsewhere (a preset's half on its own row) shows the new value too.
     for (auto& page : edit_->pages) {
       for (auto& other : page.settings) {
@@ -218,7 +229,7 @@ void SettingsScreen::SetSlider(GameSetting& s, int value) {
   value = std::clamp(value, s.slider_min, s.slider_max);
   if (std::to_string(value) == s.value) return;
   s.value = std::to_string(value);
-  changes_[s.cvar] = {s.category, s.type, s.value};
+  NoteChange(s.cvar, s.category, s.type, s.value);
   confirm_discard_ = false;
 }
 
@@ -239,6 +250,7 @@ void SettingsScreen::Save() {
   for (const auto& [cvar, c] : changes_) {
     ok = WriteGameSetting(edit_->config_file, c.category, cvar, c.type, c.value) && ok;
     saved_[cvar] = c.value;
+    original_[cvar] = c.value;
   }
   const size_t n = changes_.size();
   changes_.clear();
@@ -248,7 +260,11 @@ void SettingsScreen::Save() {
     std::snprintf(text, sizeof(text), "%s", german_ ? "Konnte die Einstellungsdatei nicht schreiben"
                                                     : NL("Could not write the settings file"));
   } else if (n) {
-    std::snprintf(text, sizeof(text), german_ ? "%zu Einstellung(en) gespeichert" : NL("%zu setting(s) saved"), n);
+    if (german_) {
+      std::snprintf(text, sizeof(text), n == 1 ? "1 Einstellung gespeichert" : "%zu Einstellungen gespeichert", n);
+    } else {
+      std::snprintf(text, sizeof(text), n == 1 ? NL("1 setting saved") : NL("%zu settings saved"), n);
+    }
   } else {
     std::snprintf(text, sizeof(text), "%s", german_ ? "Nichts ge\xC3\xA4ndert" : NL("Nothing changed"));
   }
@@ -258,7 +274,14 @@ void SettingsScreen::Save() {
 
 void SettingsScreen::Draw(float width, float height) {
   if (!edit_ && loader_ && loader_->state() == 1) {
-    if (auto loaded = loader_->settings()) edit_ = std::make_shared<GameSettings>(*loaded);
+    if (auto loaded = loader_->settings()) {
+      edit_ = std::make_shared<GameSettings>(*loaded);
+      for (const GameSettingsPage& page : edit_->pages) {
+        for (const GameSetting& s : page.settings) {
+          if (!s.cvar.empty()) original_.emplace(s.cvar, s.value);
+        }
+      }
+    }
   }
   const ImGuiIO& io = ImGui::GetIO();
   ImGui::SetNextWindowPos({0, 0});
@@ -505,16 +528,27 @@ void SettingsScreen::Draw(float width, float height) {
     dl->AddRectFilled(a, b, Rgba(20, 26, 64, 250), 18 * u);
     dl->AddRect(a, b, kGold, 18 * u, 0, 3 * u);
     Text(dl, bold_, 28 * u, {a.x + 28 * u, a.y + 22 * u}, kGold,
-         german_ ? "\xC3\x84nderungen speichern?" : NL("Save the changes?"));
+         german_ ? "\xC3\x84nderungen speichern?" : NL("Save changes?"));
+    // Whole sentences with the right number ("Einstellung(en) geändert, noch nicht gespeichert"
+    // wasn't one, the owner 2026-11-06).
     char text[160];
-    std::snprintf(text, sizeof(text),
-                  german_ ? "%zu Einstellung(en) ge\xC3\xA4ndert, noch nicht gespeichert." : NL("%zu setting(s) changed, not saved yet."),
-                  changes_.size());
+    const size_t n = changes_.size();
+    if (german_) {
+      std::snprintf(text, sizeof(text),
+                    n == 1 ? "Du hast 1 Einstellung ge\xC3\xA4ndert und noch nicht gespeichert."
+                           : "Du hast %zu Einstellungen ge\xC3\xA4ndert und noch nicht gespeichert.",
+                    n);
+    } else {
+      std::snprintf(text, sizeof(text),
+                    n == 1 ? NL("You changed 1 setting and haven't saved it yet.")
+                           : NL("You changed %zu settings and haven't saved them yet."),
+                    n);
+    }
     Text(dl, regular_, 20 * u, {a.x + 28 * u, a.y + 70 * u}, kWhite, text, pw - 56 * u);
     float bx = a.x + 28 * u;
     const float by = b.y - 52 * u;
     bx = Hint(dl, bold_, 22 * u, {bx, by}, "A", Rgba(70, 170, 70), german_ ? "Speichern" : NL("Save"));
-    bx = Hint(dl, bold_, 22 * u, {bx, by}, "X", Rgba(50, 120, 220), german_ ? "Verwerfen" : NL("Throw away"));
+    bx = Hint(dl, bold_, 22 * u, {bx, by}, "X", Rgba(50, 120, 220), german_ ? "Verwerfen" : NL("Discard"));
     bx = Hint(dl, bold_, 22 * u, {bx, by}, "B", Rgba(200, 60, 60), german_ ? "Weiter bearbeiten" : NL("Keep editing"));
     if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
       Save();
