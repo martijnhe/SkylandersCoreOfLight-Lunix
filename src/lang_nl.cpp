@@ -14,6 +14,8 @@ bool g_dutch = false;
 // English -> Dutch, every English text the screens show (lang_nl.h). Informal "je", as the German
 // screens say "du"; the Skylanders words as the Dutch games have them (Zielsteen, Heldenpunten).
 constexpr std::pair<const char*, const char*> kDutch[] = {
+    {"SuperChargers: the French / Dutch disc can be set up, with Dutch.",
+     "SuperChargers: de Frans-Nederlandse disc kan worden ingesteld, met Nederlands."},
     {"Runs on Linux and the Steam Deck, also as one AppImage file.",
      "Draait op Linux en de Steam Deck, ook als \xC3\xA9\xC3\xA9n AppImage-bestand."},
     {"Dutch: the launcher, and Nederlands in every game's language setting.",
