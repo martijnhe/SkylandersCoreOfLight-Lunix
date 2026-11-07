@@ -176,6 +176,25 @@ bool HasText(const fs::path& file, std::string_view text) {
   return false;
 }
 
+// Dutch for every game's Language setting that doesn't offer it: the extended console language 16,
+// as a raw number, which every game's `language` setting takes (src/localization.cpp in all six
+// ports: "A raw Xbox 360 language ID (a number) also works"). The game then reads its Dutch text
+// and voices where its disc has them: the European French / Dutch discs of Swap Force, Trap Team
+// and Imaginators, and Spyro's Adventure's many-language disc (with the country too, settings_ui.cpp
+// Save). Checked 2026-11-07 on Trap Team and Spyro's Adventure. Giants needs its own "dutch" (a
+// region hook picks the European language set), so a game that offers Dutch itself keeps its row.
+void AddDutch(GameSetting& g) {
+  if (g.cvar != "language" || g.options.empty()) return;
+  for (const SettingChoice& o : g.options) {
+    if (o.value == "dutch" || o.value == "16") return;
+  }
+  g.options.push_back({"16", "Nederlands", "Nederlands"});
+  g.help_en += "\nNederlands: the game's Dutch, where its disc has it (the French / Dutch discs, and "
+               "Spyro's Adventure's disc).";
+  g.help_de += "\nNederlands: das Niederl\xC3\xA4ndisch des Spiels, wo seine Disc es hat (die "
+               "franz\xC3\xB6sisch-niederl\xC3\xA4ndischen Discs und die von Spyro's Adventure).";
+}
+
 std::shared_ptr<GameSettings> FromJson(const Json& root) {
   auto out = std::make_shared<GameSettings>();
   out->config_file = Utf8Path(root.Str("config_file"));
@@ -204,6 +223,7 @@ std::shared_ptr<GameSettings> FromJson(const Json& root) {
       if (const Json* options = s.Get("options")) {
         for (const Json& o : options->items) g.options.push_back({o.Str("value"), o.Str("en"), o.Str("de")});
       }
+      AddDutch(g);
       if (const Json* presets = s.Get("presets")) {
         for (const auto& [option, list] : presets->members) {
           auto& assignments = g.presets[option];

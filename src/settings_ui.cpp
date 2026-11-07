@@ -249,6 +249,17 @@ void SettingsScreen::Save() {
   bool ok = true;
   for (const auto& [cvar, c] : changes_) {
     ok = WriteGameSetting(edit_->config_file, c.category, cvar, c.type, c.value) && ok;
+    // Nederlands (game_settings.cpp AddDutch): the console's country goes to the Netherlands (74)
+    // as well, which Spyro's Adventure needs for its Dutch (with the language alone it stayed
+    // English, checked 2026-11-07); leaving Dutch puts the SDK's default (103) back.
+    if (cvar == "language") {
+      const auto before = original_.find(cvar);
+      if (c.value == "16") {
+        ok = WriteGameSetting(edit_->config_file, "Kernel", "user_country", "int", "74") && ok;
+      } else if (before != original_.end() && before->second == "16") {
+        ok = WriteGameSetting(edit_->config_file, "Kernel", "user_country", "int", "103") && ok;
+      }
+    }
     saved_[cvar] = c.value;
     original_[cvar] = c.value;
   }
