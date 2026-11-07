@@ -1,6 +1,10 @@
 #include "handheld.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <fstream>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -9,11 +13,13 @@
 #include <string_view>
 
 #include "hub_log.h"
+#include "platform.h"
 
 namespace coreoflight {
 
 namespace {
 
+#ifdef _WIN32
 // The main screen's diagonal in inches from its raw DPI (shcore's GetDpiForMonitor, MDT_RAW_DPI =
 // 2: the panel's real pixels per inch from its EDID), loaded by hand so nothing more is linked;
 // 0 when Windows doesn't know it.
@@ -54,6 +60,23 @@ std::string CpuName() {
   out.erase(out.find_last_not_of(' ') + 1);  // the name is padded with spaces
   return out;
 }
+#else
+// Off Windows the processor's name says it (/proc/cpuinfo); the screen's size isn't asked: the
+// handheld chips and a Steam Deck's board (platform.h OnSteamDeck) are enough.
+float ScreenInches() { return 0; }
+
+std::string CpuName() {
+  std::ifstream in("/proc/cpuinfo");
+  for (std::string line; std::getline(in, line);) {
+    if (line.rfind("model name", 0) != 0) continue;
+    std::string out = line.substr(line.find(':') == std::string::npos ? line.size() : line.find(':') + 1);
+    out.erase(0, out.find_first_not_of(' '));
+    out.erase(out.find_last_not_of(' ') + 1);
+    return out;
+  }
+  return {};
+}
+#endif
 
 }  // namespace
 
@@ -70,7 +93,7 @@ const HandheldInfo& DetectHandheld() {
     for (const std::string_view name : {"ryzen z1", "ryzen z2", "custom apu 0405", "custom apu 0932"}) {
       chip = chip || lower.find(name) != std::string::npos;
     }
-    i.detected = chip || (i.screen_inches > 0 && i.screen_inches <= 9.0f);
+    i.detected = chip || platform::OnSteamDeck() || (i.screen_inches > 0 && i.screen_inches <= 9.0f);
     char line[300];
     std::snprintf(line, sizeof(line), "handheld: screen %.1f\", cpu \"%s\" -> %s", double(i.screen_inches),
                   i.cpu.c_str(), i.detected ? "handheld" : "not a handheld");

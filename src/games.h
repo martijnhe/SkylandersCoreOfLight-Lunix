@@ -19,7 +19,7 @@ struct Game {
   const char* name_en;    // "Spyro's Adventure"
   const char* name_de;
   int year;               // 2011
-  const char* exe;        // "ssarecompiled.exe"
+  const char* exe;        // "ssarecompiled.exe" ("ssarecompiled" on Linux)
   const char* repo;       // "SSARecomp", the folder of its repository
   const char* app_name;   // "Spyro's Adventure Recompiled", its installer's folder
   // The discs' default.xex, as its repository pins them: SHA-256s and code pins, comma separated
@@ -89,7 +89,7 @@ struct Found {
 // game's default.xex on a background thread.
 void FindGames(std::vector<Found>& found, const std::filesystem::path& launcher_dir);
 
-// Starts a game's exe in its own folder; false (and `error`) if Windows refused.
+// Starts a game's exe in its own folder; false (and `error`) if the system refused.
 bool StartGame(const Found& game, std::wstring& error, void** process);
 
 
@@ -125,6 +125,10 @@ bool StartGameInstall(size_t game, const std::filesystem::path& setup, bool germ
 // developer's build); a setup's version from its name (<Repo>Setup-<version>.exe); and whether
 // version a is older than b (0.1.0-alpha.2 < 0.1.0-beta.1 < 0.1.0, numbers as numbers).
 std::string InstalledVersion(const Game& game, const std::filesystem::path& exe);
+// A game's setup file name is <SetupPrefix>-<version><SetupExtension>: <Repo>Setup-<version>.exe
+// on Windows, <Repo>-linux-x86_64-<version>.tar.gz (the release's archive) on Linux.
+std::string SetupPrefix(const Game& game);
+const char* SetupExtension();
 std::string SetupVersion(const Game& game, const std::filesystem::path& setup);
 bool VersionLess(const std::string& a, const std::string& b);
 // Why the last install of `game` stopped, from its setup log ("ROM: ..." lines and the like);

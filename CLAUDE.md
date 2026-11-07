@@ -30,6 +30,11 @@ From a Visual Studio 2022 x64 developer prompt: `git submodule update --init`, t
 `cmake --preset release` and `cmake --build --preset release` (out/build/release/coreoflight.exe);
 or `python maintainer/release.py build --repos SkylandersCoreOfLight`.
 
+Linux: `cmake --preset linux-release` and `cmake --build --preset linux-release`; the Steam Deck ZIP
+with `tools/build_steamdeck.sh` (Steam Runtime sniper SDK in Docker / Podman). What differs between
+the systems is in `src/platform.h`, `pad_state_sdl.h`, `main_sdl.cpp`, `music_sdl.cpp`,
+`textures_gl.cpp` and `desktop_entries.cpp`; Windows code stays behind `#ifdef _WIN32`.
+
 ## Status convention
 
 `docs/roadmap.md` is the overview (phases = milestones, "now / next / later"); update it whenever an

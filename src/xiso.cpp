@@ -8,9 +8,12 @@
 // 0x2080000, the first Xbox's at 0x18300000, a trimmed image at 0.
 
 #include "xiso.h"
+#include "platform.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -124,6 +127,7 @@ bool XisoImage::Read(const Entry& entry, std::vector<uint8_t>& out) {
   return ReadAt(entry.offset, out.data(), out.size());
 }
 
+#ifdef _WIN32
 bool MakeDirs(const fs::path& dir) {
   const std::wstring path = dir.wstring();
   // Each prefix that ends before a separator, then the whole path; the drive ("Z:") and a UNC
@@ -149,6 +153,19 @@ std::string LastErrorText() {
   while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
   return "Windows error " + std::to_string(code) + (out.empty() ? "" : ": " + out);
 }
+#else
+bool MakeDirs(const fs::path& dir) {
+  std::error_code ec;
+  fs::create_directories(dir, ec);
+  errno = ec.value();
+  return fs::is_directory(dir, ec);
+}
+
+std::string LastErrorText() {
+  const int code = errno;
+  return "error " + std::to_string(code) + ": " + std::strerror(code);
+}
+#endif
 
 bool XisoImage::Extract(const fs::path& to, const std::function<bool(uint64_t, uint64_t)>& progress,
                         std::string& error, const std::string& skip_folder) {
@@ -172,6 +189,7 @@ bool XisoImage::Extract(const fs::path& to, const std::function<bool(uint64_t, u
   // folder plus the disc's longest names (Spyro's Adventure's models/characters/minionsmonsters/...)
   // passes it, and the game couldn't open such a file either (seen with a folder of 150 characters,
   // which only said "cannot write" half way through).
+#ifdef _WIN32
   const size_t folder_length = fs::absolute(to, ec).wstring().size() + 1;
   for (const Entry* e : order) {
     if (folder_length + fs::path(std::u8string(reinterpret_cast<const char8_t*>(e->path.data()), e->path.size()))
@@ -181,6 +199,7 @@ bool XisoImage::Extract(const fs::path& to, const std::function<bool(uint64_t, u
       return false;
     }
   }
+#endif
   for (const Entry* entry : order) {
     const Entry& e = *entry;
     const fs::path target = to / fs::path(std::u8string(reinterpret_cast<const char8_t*>(e.path.data()), e.path.size()));
@@ -222,23 +241,6 @@ bool XisoImage::Extract(const fs::path& to, const std::function<bool(uint64_t, u
   return true;
 }
 
-std::string Sha256Hex(const void* data, size_t size) {
-  BCRYPT_ALG_HANDLE alg = nullptr;
-  BCRYPT_HASH_HANDLE hash = nullptr;
-  if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return {};
-  std::string out;
-  unsigned char digest[32];
-  if (BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-    if (BCryptHashData(hash, static_cast<PUCHAR>(const_cast<void*>(data)), ULONG(size), 0) == 0 &&
-        BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
-      char hex[65];
-      for (int i = 0; i < 32; ++i) std::snprintf(hex + 2 * i, 3, "%02x", digest[i]);
-      out.assign(hex, 64);
-    }
-    BCryptDestroyHash(hash);
-  }
-  BCryptCloseAlgorithmProvider(alg, 0);
-  return out;
-}
+std::string Sha256Hex(const void* data, size_t size) { return platform::Sha256Hex(data, size); }
 
 }  // namespace coreoflight

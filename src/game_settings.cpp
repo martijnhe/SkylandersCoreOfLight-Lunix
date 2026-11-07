@@ -1,6 +1,8 @@
 #include "game_settings.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cstdlib>
@@ -11,6 +13,7 @@
 #include <utility>
 
 #include "games.h"
+#include "platform.h"
 
 namespace coreoflight {
 namespace {
@@ -219,9 +222,7 @@ std::shared_ptr<GameSettings> FromJson(const Json& root) {
 }
 
 std::shared_ptr<GameSettings> Load(const fs::path& exe, const fs::path& workdir, const std::string& key) {
-  wchar_t temp[MAX_PATH] = L"";
-  GetTempPathW(MAX_PATH, temp);
-  const fs::path dir = fs::path(temp) / L"CoreOfLight";
+  const fs::path dir = platform::TempDir();
   std::error_code ec;
   fs::create_directories(dir, ec);
   const fs::path schema = dir / (key + "_settings.json");
@@ -229,18 +230,14 @@ std::shared_ptr<GameSettings> Load(const fs::path& exe, const fs::path& workdir,
   // A build from before --settings_schema would start the whole game instead: only an exe that
   // has the setting's name in it is asked.
   if (!HasText(exe, "settings_schema")) return nullptr;
-  std::wstring command = L"\"" + exe.wstring() + L"\" \"--settings_schema=" + schema.wstring() + L"\"";
-  STARTUPINFOW startup = {sizeof(startup)};
-  PROCESS_INFORMATION info = {};
-  if (!CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
-                      workdir.c_str(), &startup, &info)) {
-    return nullptr;
-  }
-  CloseHandle(info.hThread);
+  const std::u8string schema_u8 = schema.u8string();
+  void* process = platform::StartProcess(exe, {"--settings_schema=" + std::string(schema_u8.begin(), schema_u8.end())},
+                                         workdir, true);
+  if (!process) return nullptr;
   // It quits by itself once it has written the file; a game too old for --settings_schema would
   // start for real, so it is stopped after a while.
-  if (WaitForSingleObject(info.hProcess, 30000) != WAIT_OBJECT_0) TerminateProcess(info.hProcess, 1);
-  CloseHandle(info.hProcess);
+  if (!platform::WaitProcess(process, 30000)) platform::KillProcess(process, 1);
+  platform::CloseProcess(process);
   std::ifstream in(schema, std::ios::binary);
   const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
   if (text.empty()) return nullptr;

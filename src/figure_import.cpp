@@ -12,7 +12,9 @@
 // A file whose bytes are in the Imaginators folder already counts as there; a new one keeps its
 // own name (or gets the figure's), numbered when the name is taken ("Starcast (2).dump").
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -28,6 +30,8 @@
 #include "portal/figure_crypto.h"
 #include "portal/figure_file.h"
 #include "portal/figure_info.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -69,7 +73,7 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
     };
     if (imaginators.exe.empty()) {
       finish(german ? "Imaginators ist nicht installiert: die Pr\xC3\xBC" "fung braucht das Spiel."
-                    : "Imaginators isn't installed: the check needs the game.");
+                    : NL("Imaginators isn't installed: the check needs the game."));
       return;
     }
     // Step 1, here.
@@ -95,22 +99,22 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
       const auto size = it->file_size(ec);
       // Figure files only: a dump's 1024 bytes, or a .dump / .bin that isn't (said why).
       if (ec || size != 1024) {
-        if (ext == ".dump" || ext == ".bin") skip(it->path(), german ? "keine 1024 Bytes" : "not 1024 bytes");
+        if (ext == ".dump" || ext == ".bin") skip(it->path(), german ? "keine 1024 Bytes" : NL("not 1024 bytes"));
         continue;
       }
       const auto data = sp::LoadFigureFile(it->path());
       if (!data) continue;
       const uint16_t crc = uint16_t((*data)[0x1E] | (*data)[0x1F] << 8);
       if (sp::FigureCrc16(data->data(), 0x1E) != crc) {
-        skip(it->path(), german ? "Kopf-Pr\xC3\xBC" "fsumme falsch" : "header checksum wrong");
+        skip(it->path(), german ? "Kopf-Pr\xC3\xBC" "fsumme falsch" : NL("header checksum wrong"));
         continue;
       }
       std::string other_game;
       const sp::SkylanderInfo* info = ImaginatorsToy(sp::ReadFigureId(*data), sp::ReadFigureVariant(*data), other_game);
       if (!info) {
         skip(it->path(), !other_game.empty() ? (german ? "aus " + other_game + " (macht das Portal-Men\xC3\xBC selbst)"
-                                                        : "from " + other_game + " (the portal menu makes those)")
-                                              : (german ? "unbekanntes Spielzeug" : "unknown toy"));
+                                                        : NL("from ") + other_game + NL(" (the portal menu makes those)"))
+                                              : (german ? "unbekanntes Spielzeug" : NL("unknown toy")));
         continue;
       }
       // The file's own name when it is one (a collection's "Water Quickshot", "Bronze Mystery Chest
@@ -132,13 +136,11 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
       int n = 0;
       for (const auto& [reason, count] : skipped) n += count;
       finish(german ? "Keine Imaginators-Figuren gefunden" + (n ? " (" + std::to_string(n) + " \xC3\xBC" "bersprungen)." : std::string("."))
-                    : "No Imaginators figures found" + (n ? " (" + std::to_string(n) + " skipped)." : std::string(".")));
+                    : NL("No Imaginators figures found") + (n ? " (" + std::to_string(n) + NL(" skipped).") : std::string(".")));
       return;
     }
     // Step 2, the game.
-    wchar_t temp[MAX_PATH] = L"";
-    GetTempPathW(MAX_PATH, temp);
-    const fs::path list = fs::path(temp) / "CoreOfLight" / "figure_check.txt";
+    const fs::path list = platform::TempDir() / "figure_check.txt";
     fs::create_directories(list.parent_path(), ec);
     fs::remove(fs::path(list.wstring() + L".result"), ec);
     {
@@ -148,12 +150,12 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
     void* process = nullptr;
     if (!StartFigureCheck(imaginators, list, &process)) {
       finish(german ? "Diese Imaginators-Version kann die Figuren noch nicht pr\xC3\xBC" "fen: bitte aktualisieren."
-                    : "This Imaginators version can't check figures yet: please update it.");
+                    : NL("This Imaginators version can't check figures yet: please update it."));
       return;
     }
     // About 5 s; a minute is plenty, then it is stopped.
-    if (WaitForSingleObject(HANDLE(process), 60000) == WAIT_TIMEOUT) TerminateProcess(HANDLE(process), 1);
-    CloseHandle(HANDLE(process));
+    if (!platform::WaitProcess(process, 60000)) platform::KillProcess(process, 1);
+    platform::CloseProcess(process);
     std::map<std::string, std::string> verdict;  // file -> "ok" / "unsigned" / "bad"
     {
       std::ifstream in(fs::path(list.wstring() + L".result"), std::ios::binary);
@@ -167,7 +169,7 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
     }
     if (verdict.empty()) {
       finish(german ? "Imaginators hat die Figuren nicht gepr\xC3\xBC" "ft (siehe Problem melden)."
-                    : "Imaginators didn't check the figures (see Report a problem).");
+                    : NL("Imaginators didn't check the figures (see Report a problem)."));
       return;
     }
     // In: what passed and isn't there yet.
@@ -183,7 +185,7 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
     for (const Candidate& c : candidates) {
       const auto v = verdict.find(U8(c.file));
       if (v == verdict.end() || (v->second != "ok" && v->second != "unsigned")) {
-        skip(c.file, german ? "vom Spiel abgelehnt" : "refused by the game");
+        skip(c.file, german ? "vom Spiel abgelehnt" : NL("refused by the game"));
         continue;
       }
       if (!have.insert(Bytes(c.data)).second) {
@@ -195,7 +197,7 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
         ++imported;
         HubLog("figure import: " + U8(c.file) + " -> " + U8(to));
       } else {
-        skip(c.file, german ? "konnte nicht schreiben" : "couldn't write");
+        skip(c.file, german ? "konnte nicht schreiben" : NL("couldn't write"));
       }
     }
     int skipped_count = 0;
@@ -205,10 +207,10 @@ void FigureImport::Start(const fs::path& source, const Found& imaginators, const
       reasons += (reasons.empty() ? "" : ", ") + std::to_string(count) + " " + reason;
     }
     std::string text = german ? std::to_string(imported) + " neu, " + std::to_string(already) + " schon da"
-                              : std::to_string(imported) + " new, " + std::to_string(already) + " already there";
+                              : std::to_string(imported) + NL(" new, ") + std::to_string(already) + NL(" already there");
     if (skipped_count) {
       text += german ? ", " + std::to_string(skipped_count) + " \xC3\xBC" "bersprungen (" + reasons + ")"
-                     : ", " + std::to_string(skipped_count) + " skipped (" + reasons + ")";
+                     : ", " + std::to_string(skipped_count) + NL(" skipped (") + reasons + ")";
     }
     finish(text);
   }).detach();

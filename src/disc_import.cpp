@@ -1,7 +1,9 @@
 #include "disc_import.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shobjidl.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -14,6 +16,8 @@
 #include "hub_log.h"
 #include "language_import.h"
 #include "xiso.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -33,9 +37,9 @@ std::optional<uint64_t> FreeBytes(fs::path path) {
     if (path == path.parent_path()) break;
     path = path.parent_path();
   }
-  ULARGE_INTEGER free{};
-  if (!GetDiskFreeSpaceExW(path.c_str(), &free, nullptr, nullptr)) return std::nullopt;
-  return free.QuadPart;
+  const fs::space_info space = fs::space(path, ec);
+  if (ec) return std::nullopt;
+  return uint64_t(space.available);
 }
 
 // The bytes of the files under `folder` (an older disc there is overwritten in place).
@@ -59,16 +63,17 @@ std::string Gigabytes(uint64_t bytes, bool german) {
 
 }  // namespace
 
+#ifdef _WIN32
 bool DiscImport::PickIso(fs::path& iso, bool german) {
   const HRESULT init = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
   bool picked = false;
   IFileOpenDialog* dialog = nullptr;
   if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
-    const COMDLG_FILTERSPEC filters[] = {{german ? L"Xbox-360-Disc (ISO)" : L"Xbox 360 disc (ISO)", L"*.iso"},
-                                         {german ? L"Alle Dateien" : L"All files", L"*.*"}};
+    const COMDLG_FILTERSPEC filters[] = {{german ? L"Xbox-360-Disc (ISO)" : NLW(L"Xbox 360 disc (ISO)"), L"*.iso"},
+                                         {german ? L"Alle Dateien" : NLW(L"All files"), L"*.*"}};
     dialog->SetFileTypes(2, filters);
     dialog->SetTitle(german ? L"Eigene Skylanders-Disc (Xbox 360, ISO) wählen"
-                            : L"Choose your own Skylanders disc (Xbox 360, ISO)");
+                            : NLW(L"Choose your own Skylanders disc (Xbox 360, ISO)"));
     IShellItem* item = nullptr;
     if (SUCCEEDED(dialog->Show(GetActiveWindow())) && SUCCEEDED(dialog->GetResult(&item))) {
       PWSTR path = nullptr;
@@ -94,7 +99,7 @@ bool DiscImport::PickFolder(fs::path& folder, bool german) {
     dialog->GetOptions(&options);
     dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
     dialog->SetTitle(german ? L"Ordner mit der entpackten Disc (mit default.xex) w\u00e4hlen"
-                            : L"Choose the folder with the unpacked disc (with default.xex)");
+                            : NLW(L"Choose the folder with the unpacked disc (with default.xex)"));
     IShellItem* item = nullptr;
     if (SUCCEEDED(dialog->Show(GetActiveWindow())) && SUCCEEDED(dialog->GetResult(&item))) {
       PWSTR path = nullptr;
@@ -110,6 +115,21 @@ bool DiscImport::PickFolder(fs::path& folder, bool german) {
   if (SUCCEEDED(init)) CoUninitialize();
   return picked;
 }
+#else
+bool DiscImport::PickIso(fs::path& iso, bool german) {
+  return platform::PickWithDialog(false,
+                                  german ? "Eigene Skylanders-Disc (Xbox 360, ISO) w\xC3\xA4hlen"
+                                         : NL("Choose your own Skylanders disc (Xbox 360, ISO)"),
+                                  "*.iso *.ISO", iso);
+}
+
+bool DiscImport::PickFolder(fs::path& folder, bool german) {
+  return platform::PickWithDialog(true,
+                                  german ? "Ordner mit der entpackten Disc (mit default.xex) w\xC3\xA4hlen"
+                                         : NL("Choose the folder with the unpacked disc (with default.xex)"),
+                                  {}, folder);
+}
+#endif
 
 bool DiscImport::running() const {
   const Phase p = phase();
@@ -162,7 +182,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       xex.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
       if (xex.empty()) {
         say(german ? "In dem Ordner ist kein default.xex (die entpackte Disc fehlt)."
-                   : "That folder has no default.xex (the unpacked disc is missing).",
+                   : NL("That folder has no default.xex (the unpacked disc is missing)."),
             Phase::kFailed);
         return;
       }
@@ -171,18 +191,18 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       if (!image && IsPs3Disc(iso)) {
         say(german ? "Das ist eine PS3-Disc. Die Spiele brauchen ihre Xbox-360-Disc; eine PS3-Disc hilft nur "
                      "Imaginators, f\xC3\xBCr seine Sprachen (Einstellungen des Hubs > Imaginators-Sprache)."
-                   : "That's a PS3 disc. The games need their Xbox 360 disc; a PS3 disc only helps Imaginators, "
-                     "for its languages (Launcher settings > Imaginators language).",
+                   : NL("That's a PS3 disc. The games need their Xbox 360 disc; a PS3 disc only helps Imaginators, "
+                     "for its languages (Launcher settings > Imaginators language)."),
             Phase::kFailed);
         return;
       }
       if (!image) {
-        say(german ? "Das ist keine Xbox-360-Disc (ISO)." : "That isn't an Xbox 360 disc (ISO).", Phase::kFailed);
+        say(german ? "Das ist keine Xbox-360-Disc (ISO)." : NL("That isn't an Xbox 360 disc (ISO)."), Phase::kFailed);
         return;
       }
       const XisoImage::Entry* entry = image->Find("default.xex");
       if (!entry || !image->Read(*entry, xex)) {
-        say(german ? "Auf der Disc ist kein default.xex." : "The disc has no default.xex.", Phase::kFailed);
+        say(german ? "Auf der Disc ist kein default.xex." : NL("The disc has no default.xex."), Phase::kFailed);
         return;
       }
     }
@@ -200,9 +220,9 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       say(german ? "Diese Disc kennt Core of Light nicht: ein anderes Spiel oder ein anderer Build (jedes "
                    "Spiel ist f\xC3\xBCr den Code einer Disc gemacht, meist der europ\xC3\xA4ischen; siehe die "
                    "Seite des Spiels). Was f\xC3\xBCr eine Disc es ist, steht in Problem melden."
-                 : "Core of Light doesn't know this disc: another game or another build (each game is made for "
+                 : NL("Core of Light doesn't know this disc: another game or another build (each game is made for "
                    "one disc's code, mostly the European one's; see the game's page). Report a problem says "
-                   "which disc it is.",
+                   "which disc it is."),
           Phase::kFailed);
       return;
     }
@@ -210,7 +230,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
     const std::string name = german ? games[game].name_de : games[game].name_en;
     if (!targets[game].installed) {
       say(name + (german ? ": das Spiel ist noch nicht installiert (erst das Spiel, dann die Disc)."
-                         : ": the game isn't installed yet (the game first, then its disc)."),
+                         : NL(": the game isn't installed yet (the game first, then its disc).")),
           Phase::kFailed);
       return;
     }
@@ -220,7 +240,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       std::ifstream in(rom / "default.xex", std::ios::binary);
       const std::vector<char> have((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
       if (!repair && !have.empty() && Sha256Hex(have.data(), have.size()) == hash) {
-        say(name + (german ? ": die Disc ist schon eingerichtet." : ": the disc is set up already."), Phase::kDone);
+        say(name + (german ? ": die Disc ist schon eingerichtet." : NL(": the disc is set up already.")), Phase::kDone);
         return;
       }
     }
@@ -248,8 +268,8 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
     if (const auto free = FreeBytes(rom); free && *free < needed) {
       say(name + (german ? ": nicht genug Platz auf dem Laufwerk (" + Gigabytes(*free, true) + " frei, " +
                                Gigabytes(needed, true) + " n\xC3\xB6tig)."
-                         : ": not enough room on the drive (" + Gigabytes(*free, false) + " free, " +
-                               Gigabytes(needed, false) + " needed)."),
+                         : NL(": not enough room on the drive (") + Gigabytes(*free, false) + NL(" free, ") +
+                               Gigabytes(needed, false) + NL(" needed).")),
           Phase::kFailed);
       return;
     }
@@ -262,7 +282,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
     uint64_t written = 0;
     if (folder) {
       say(name + (german ? ": die Disc wird in den rom-Ordner des Spiels kopiert ..."
-                         : ": copying the disc into the game's rom folder ..."),
+                         : NL(": copying the disc into the game's rom folder ...")),
           Phase::kUnpacking);
       ok = true;
       for (const auto& [relative, size] : files) {
@@ -273,7 +293,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
         }
         MakeDirs((rom / relative).parent_path());
         if (!fs::copy_file(iso / relative, rom / relative, fs::copy_options::overwrite_existing, ec)) {
-          error = (german ? "kann nicht kopieren: " : "cannot copy: ") + relative.string() + " (" + ec.message() + ")";
+          error = (german ? "kann nicht kopieren: " : NL("cannot copy: ")) + relative.string() + " (" + ec.message() + ")";
           ok = false;
           break;
         }
@@ -282,7 +302,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       }
     } else {
       say(name + (german ? ": die Disc wird in den rom-Ordner des Spiels entpackt ..."
-                         : ": unpacking the disc into the game's rom folder ..."),
+                         : NL(": unpacking the disc into the game's rom folder ...")),
           Phase::kUnpacking);
       ok = image->Extract(rom, [&](uint64_t done, uint64_t) {
         shared->done = written = done;
@@ -295,10 +315,10 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       if (written) fs::remove(rom / "default.xex", ec);
       if (shared->cancel) {
         say(name + (german ? ": Einlesen abgebrochen, die Disc ist nicht eingerichtet."
-                           : ": stopped, the disc isn't set up."),
+                           : NL(": stopped, the disc isn't set up.")),
             Phase::kFailed);
       } else {
-        say(name + (german ? ": Entpacken fehlgeschlagen (" : ": unpacking failed (") + error + ")", Phase::kFailed);
+        say(name + (german ? ": Entpacken fehlgeschlagen (" : NL(": unpacking failed (")) + error + ")", Phase::kFailed);
       }
       return;
     }
@@ -315,7 +335,7 @@ void DiscImport::Start(const fs::path& iso, const std::vector<Found>& found, boo
       }
     }
     WriteDiscFileList(rom, list);
-    say(name + (german ? ": Disc eingerichtet, bereit zum Spielen." : ": disc set up, ready to play."), Phase::kDone);
+    say(name + (german ? ": Disc eingerichtet, bereit zum Spielen." : NL(": disc set up, ready to play.")), Phase::kDone);
   }).detach();
 }
 

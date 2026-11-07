@@ -16,6 +16,7 @@
 #include "alchemy/lzma_decoder.h"
 #include "hub_log.h"
 #include "inflate.h"
+#include "lang_nl.h"
 
 // stb_image's zlib decoder for the raw deflate blocks, every function static (nothing else of it
 // is used; InflateRaw below gives the rest of the launcher the same decoder).
@@ -969,7 +970,7 @@ int Movies(Job& job, std::vector<std::string>& skipped) {
   const std::vector<std::string> names = SpokenMovies(job.archives);
   for (size_t k = 0; k < names.size(); ++k) {
     const std::string& name = names[k];
-    job.report((job.german ? "Filme " : "movies ") + std::to_string(k + 1) + " / " + std::to_string(names.size()), 0.85f + 0.15f * float(k) / float(names.size()));
+    job.report((job.german ? "Filme " : NL("movies ")) + std::to_string(k + 1) + " / " + std::to_string(names.size()), 0.85f + 0.15f * float(k) / float(names.size()));
     const fs::path target = job.archives / Path(name);
     if (fs::exists(store / Path(name), ec)) continue;  // done in an earlier run
     const std::string lower = Lower(name);
@@ -1129,17 +1130,17 @@ std::string LanguageImport::TakeSummary() {
 void LanguageImport::StartRestore(const fs::path& rom, bool german) {
   if (running()) return;
   shared_ = std::make_shared<Shared>();
-  shared_->step = german ? "zur\xC3\xBC" "cksetzen" : "restoring";
+  shared_->step = german ? "zur\xC3\xBC" "cksetzen" : NL("restoring");
   std::thread([shared = shared_, archives = rom / "archives", german] {
     int restored = 0;
     const bool ok = Restore(archives, &restored);
     std::lock_guard lock(shared->mutex);
     shared->summary = ok ? (german ? "Imaginators spricht wieder die Sprachen der Disc (" + std::to_string(restored) +
                                          " Archive zur\xC3\xBC" "ckgesetzt)."
-                                   : "Imaginators speaks its disc's languages again (" + std::to_string(restored) +
-                                         " archives restored).")
+                                   : NL("Imaginators speaks its disc's languages again (") + std::to_string(restored) +
+                                         NL(" archives restored)."))
                          : (german ? "Zur\xC3\xBC" "cksetzen ging nicht ganz (l\xC3\xA4uft Imaginators?)."
-                                   : "Couldn't restore everything (is Imaginators running?).");
+                                   : NL("Couldn't restore everything (is Imaginators running?)."));
     HubLog("language import: " + shared->summary);
     shared->done = true;
   }).detach();
@@ -1168,10 +1169,10 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
     std::error_code ec;
     if (!job->lang || !fs::is_directory(job->archives, ec)) {
       return finish(german ? "Imaginators hat noch keine Disc: zuerst die Xbox-360-Disc einlesen."
-                           : "Imaginators has no disc yet: set its Xbox 360 disc up first.");
+                           : NL("Imaginators has no disc yet: set its Xbox 360 disc up first."));
     }
     if (!job->disc.Open(source) || !job->disc.Has("permanent_ps3.pak")) {
-      return finish(german ? "Das ist keine PS3-Disc von Imaginators." : "That isn't a PS3 disc of Imaginators.");
+      return finish(german ? "Das ist keine PS3-Disc von Imaginators." : NL("That isn't a PS3 disc of Imaginators."));
     }
     // A dump straight off the disc (redump's .iso) keeps the PS3's encryption: its directory reads,
     // its files don't. A decrypted image (.dec.iso, from PS3 Disc Dumper or ps3dec) or the unpacked
@@ -1181,18 +1182,18 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
       if (!probe.Open(DiscReader(job->disc, "permanent_ps3.pak"))) {
         return finish(german ? "Diese PS3-Disc ist noch verschl\xC3\xBCsselt: nimm ein entschl\xC3\xBCsseltes Abbild "
                                "(.dec.iso) oder den entpackten Ordner."
-                             : "This PS3 disc image is still encrypted: use a decrypted one (.dec.iso) or the "
-                               "unpacked folder.");
+                             : NL("This PS3 disc image is still encrypted: use a decrypted one (.dec.iso) or the "
+                               "unpacked folder."));
       }
     }
     // Another language before: undone first (an entry is pointed at one twin only).
     const std::string before = ImportedLanguage(rom);
     if (!before.empty() && before != language) {
-      job->report(german ? "die vorige Sprache wird zur\xC3\xBC" "ckgesetzt" : "undoing the previous language", 0.01f);
+      job->report(german ? "die vorige Sprache wird zur\xC3\xBC" "ckgesetzt" : NL("undoing the previous language"), 0.01f);
       int restored = 0;
       if (!Restore(job->archives, &restored)) {
         return finish(german ? "Die vorige Sprache lie\xC3\x9F sich nicht zur\xC3\xBC" "cksetzen (l\xC3\xA4uft Imaginators?)."
-                             : "Couldn't undo the previous language (is Imaginators running?).");
+                             : NL("Couldn't undo the previous language (is Imaginators running?)."));
       }
     }
     fs::create_directories(job->backup, ec);
@@ -1200,7 +1201,7 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
     std::vector<std::string> text_archives;
     const std::vector<std::string> paks = ArchiveNames(job->archives, ".pak");
     for (size_t k = 0; k < paks.size(); ++k) {
-      if (k % 200 == 0) job->report(german ? "Texte werden gesucht" : "looking for the texts", 0.05f * float(k) / float(paks.size()));
+      if (k % 200 == 0) job->report(german ? "Texte werden gesucht" : NL("looking for the texts"), 0.05f * float(k) / float(paks.size()));
       if (EndsWith(Lower(paks[k]), kSpanishVoices)) continue;
       Iga x;
       if (!x.Open(FileReader(job->archives / Path(paks[k])))) continue;
@@ -1212,7 +1213,7 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
       }
     }
     for (size_t k = 0; k < text_archives.size(); ++k) {
-      job->report((german ? "Texte " : "texts ") + std::to_string(k + 1) + " / " + std::to_string(text_archives.size()),
+      job->report((german ? "Texte " : NL("texts ")) + std::to_string(k + 1) + " / " + std::to_string(text_archives.size()),
                   0.05f + 0.45f * float(k) / float(std::max<size_t>(1, text_archives.size())));
       const std::string twin = Replace(Lower(text_archives[k]), "xenon", "ps3");
       if (!job->disc.Has(twin)) continue;
@@ -1225,7 +1226,7 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
     // Voices: every Spanish voice bank.
     const std::vector<std::string> voice_paks = ArchiveNames(job->archives, kSpanishVoices);
     for (size_t k = 0; k < voice_paks.size(); ++k) {
-      job->report((german ? "Stimmen " : "voices ") + std::to_string(k + 1) + " / " + std::to_string(voice_paks.size()),
+      job->report((german ? "Stimmen " : NL("voices ")) + std::to_string(k + 1) + " / " + std::to_string(voice_paks.size()),
                   0.5f + 0.35f * float(k) / float(std::max<size_t>(1, voice_paks.size())));
       const std::string lower = Lower(voice_paks[k]);
       const std::string twin = lower.substr(0, lower.size() - std::strlen(kSpanishVoices)) + job->lang->suffix + ".pak";
@@ -1247,8 +1248,8 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
     std::snprintf(text, sizeof(text),
                   german ? "Imaginators spricht jetzt %s (%d Texte, %d Stimmen, %d Filme). Im Spiel unter F4 > Spiel > "
                            "Sprache alles au\xC3\x9F" "er Italienisch."
-                         : "Imaginators speaks %s now (%d texts, %d voices, %d movies). In the game's F4 > Game > "
-                           "Language, anything but Italian.",
+                         : NL("Imaginators speaks %s now (%d texts, %d voices, %d movies). In the game's F4 > Game > "
+                           "Language, anything but Italian."),
                   name.c_str(), job->texts, job->voices, job->movies);
     HubLog("language import: " + std::to_string(job->text_archives) + " text archives, " +
            std::to_string(job->voice_archives) + " voice archives");
@@ -1256,7 +1257,7 @@ void LanguageImport::Start(const fs::path& source, const fs::path& rom, const st
     if (platform_missing > 0) HubLog("language import: " + std::to_string(platform_missing) + " platform texts stay Spanish");
     if (!job->texts) {
       return finish(german ? "Keine Texte gefunden: passt die Disc zu diesem Imaginators?"
-                           : "No texts found: does the disc match this Imaginators?");
+                           : NL("No texts found: does the disc match this Imaginators?"));
     }
     finish(text);
   }).detach();

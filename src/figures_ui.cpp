@@ -20,6 +20,7 @@
 #include "portal/figure_catalog.h"
 #include "portal/figure_file.h"
 #include "textures.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -116,7 +117,7 @@ float Hint(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, const char* but
 std::string Category(std::string_view c, bool german) {
   // The catalog's "Cores" are just the Skylanders (the owner, 2026-10-24: "Kern-Skylander" can
   // simply be "Skylander").
-  if (c == "Cores") return german ? "Skylander" : "Skylanders";
+  if (c == "Cores") return german ? "Skylander" : NL("Skylanders");
   if (!german) return std::string(c);
   static const std::pair<std::string_view, std::string_view> kDe[] = {
       {"Variants", "Varianten"},     {"Chase Variants", "Seltene Varianten"},
@@ -152,9 +153,9 @@ std::string Badge(const std::string& badge, bool german) {
 std::string PlayTime(uint32_t seconds, bool german) {
   char text[48];
   if (seconds >= 3600) {
-    std::snprintf(text, sizeof(text), german ? "%u Std. %u Min." : "%u h %u min", seconds / 3600, seconds / 60 % 60);
+    std::snprintf(text, sizeof(text), german ? "%u Std. %u Min." : NL("%u h %u min"), seconds / 3600, seconds / 60 % 60);
   } else {
-    std::snprintf(text, sizeof(text), german ? "%u Min." : "%u min", seconds / 60);
+    std::snprintf(text, sizeof(text), german ? "%u Min." : NL("%u min"), seconds / 60);
   }
   return text;
 }
@@ -255,7 +256,7 @@ void FiguresScreen::Open(const fs::path& figures_dir) {
       f.element = sp::FigureElement(*info);
     } else {
       f.name = it->path().stem().string();
-      f.category = german_ ? "Unbekannt" : "Unknown";
+      f.category = german_ ? "Unbekannt" : NL("Unknown");
     }
     have.insert({f.id, f.variant});
     owned_.push_back(std::move(f));
@@ -483,11 +484,11 @@ void FiguresScreen::DrawTree(float width, float height, float u) {
     std::string label = path.name;
     if (label.empty()) {
       switch (path.kind) {
-        case 0: label = german_ ? "Angriffe" : "Attacks"; break;
-        case 1: label = german_ ? "Grund-Upgrades" : "Basic upgrades"; break;
-        case 3: label = german_ ? "Seelenstein" : "Soul Gem"; break;
+        case 0: label = german_ ? "Angriffe" : NL("Attacks"); break;
+        case 1: label = german_ ? "Grund-Upgrades" : NL("Basic upgrades"); break;
+        case 3: label = german_ ? "Seelenstein" : NL("Soul Gem"); break;
         case 4: label = "Wow Pow"; break;
-        default: label = german_ ? "Pfad" : "Path"; break;
+        default: label = german_ ? "Pfad" : NL("Path"); break;
       }
     }
     Text(dl, bold_, 18 * u, {x0, y}, kDim, Fit(bold_, 18 * u, label, col_w - 16 * u));
@@ -572,14 +573,14 @@ void FiguresScreen::DrawTree(float width, float height, float u) {
   Text(dl, bold_, 22 * u, {x, y}, kWhite, up->name, w);
   y += 32 * u;
   const bool owned = Owned(tree_figure_, *path, *up);
-  std::string status = owned ? (german_ ? "Gekauft" : "Bought") : (german_ ? "Noch nicht gekauft" : "Not bought yet");
+  std::string status = owned ? (german_ ? "Gekauft" : NL("Bought")) : (german_ ? "Noch nicht gekauft" : NL("Not bought yet"));
   if (up->cost) status += "  \xC2\xB7  " + std::to_string(up->cost) + " Gold";
   Text(dl, regular_, 17 * u, {x, y}, owned ? Rgba(110, 220, 110) : kGold, status, w);
   y += 30 * u;
   Text(dl, regular_, 17 * u, {x, y}, kDim, up->description, w);
   float hx = left;
   const float hy = height - 52 * u;
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
 }
 
 std::vector<const FiguresScreen::Figure*> FiguresScreen::Shown() const {
@@ -651,17 +652,17 @@ void FiguresScreen::Draw(float width, float height) {
   DrawBackdrop(dl, width, height,
                tab_ > 0 && tab_ <= int(std::size(kGames)) ? GameBackground(size_t(tab_ - 1)) : fs::path(), true);
   Text(dl, bold_, 22 * u, {48 * u, 30 * u}, kDim,
-       tree_ ? (german_ ? "UPGRADES" : "UPGRADES") : board_ ? (german_ ? "FIGUREN" : "FIGURES")
-                                                        : (german_ ? "FIGUREN" : "FIGURES"));
+       tree_ ? (german_ ? "UPGRADES" : NL("UPGRADES")) : board_ ? (german_ ? "FIGUREN" : NL("FIGURES"))
+                                                        : (german_ ? "FIGUREN" : NL("FIGURES")));
   Text(dl, bold_, 44 * u, {46 * u, 52 * u}, kGold,
        tree_ ? tree_figure_.name
-       : board_ ? std::string(german_ ? "Rangliste" : "Leaderboard")
+       : board_ ? std::string(german_ ? "Rangliste" : NL("Leaderboard"))
        : tab_ == 1 + int(std::size(kGames))
-           ? (all_ ? (german_ ? "Alle Magischen Objekte" : "Every magic item")
-                   : (german_ ? "Meine Magischen Objekte" : "My magic items"))
-       : all_ ? (german_ ? "Alle Skylander" : "Every Skylander") : (german_ ? "Meine Skylander" : "My Skylanders"));
+           ? (all_ ? (german_ ? "Alle Magischen Objekte" : NL("Every magic item"))
+                   : (german_ ? "Meine Magischen Objekte" : NL("My magic items")))
+       : all_ ? (german_ ? "Alle Skylander" : NL("Every Skylander")) : (german_ ? "Meine Skylander" : NL("My Skylanders")));
   // Whose figures they are (profiles.h).
-  const std::string whose = (german_ ? "Profil " : "Profile ") + ActiveProfile().name;
+  const std::string whose = (german_ ? "Profil " : NL("Profile ")) + ActiveProfile().name;
   Text(dl, regular_, 20 * u, {width - 48 * u - TextWidth(regular_, 20 * u, whose), 44 * u}, kDim, whose);
   if (tree_) {
     DrawTree(width, height, u);
@@ -710,8 +711,8 @@ void FiguresScreen::Draw(float width, float height) {
   float tx = left;
   std::vector<std::string> names, counts;
   for (int i = 0; i < tabs; ++i) {
-    names.push_back(i == 0                            ? (german_ ? "Alle Spiele" : "Every game")
-                    : i == 1 + int(std::size(kGames)) ? (german_ ? "Magische Objekte" : "Magic items")
+    names.push_back(i == 0                            ? (german_ ? "Alle Spiele" : NL("Every game"))
+                    : i == 1 + int(std::size(kGames)) ? (german_ ? "Magische Objekte" : NL("Magic items"))
                                                       : std::string(kGames[i - 1]));
     // The collection progress (#43, a launcher setting): how many of the tab's figures are owned.
     if (progress_) {
@@ -774,12 +775,12 @@ void FiguresScreen::Draw(float width, float height) {
     const float chip_top = top + 50 * u, chip_size = 16 * u;
     for (const int e : chips) {
       const sp::Element el = e > 0 ? sp::Element(e) : sp::Element::kNone;
-      const std::string name = e == 0               ? (german_ ? "Alle" : "All")
-                               : e == kKindTraps    ? (german_ ? "Fallen" : "Traps")
-                               : e == kKindVehicles ? (german_ ? "Fahrzeuge" : "Vehicles")
-                               : e == kKindCrystals ? (german_ ? "Kristalle" : "Crystals")
+      const std::string name = e == 0               ? (german_ ? "Alle" : NL("All"))
+                               : e == kKindTraps    ? (german_ ? "Fallen" : NL("Traps"))
+                               : e == kKindVehicles ? (german_ ? "Fahrzeuge" : NL("Vehicles"))
+                               : e == kKindCrystals ? (german_ ? "Kristalle" : NL("Crystals"))
                                : german_            ? std::string(ElementDe(el))
-                                                    : std::string(sp::ElementName(el));
+                                                    : NL(std::string(sp::ElementName(el)));
       const float w = TextWidth(bold_, chip_size, name) + (e > 0 ? 36 : 24) * u;
       const ImVec2 a{cx, chip_top}, b{cx + w, chip_top + 30 * u};
       if (io.MousePos.x >= a.x && io.MousePos.x < b.x && io.MousePos.y >= a.y && io.MousePos.y < b.y &&
@@ -843,9 +844,9 @@ void FiguresScreen::Draw(float width, float height) {
   const int first_row = grid_scroll_;
   if (!n) {
     Text(dl, regular_, 22 * u, {left, grid_top + 10 * u}, kDim,
-         all_ ? (german_ ? "Keine Skylander." : "No Skylanders.")
+         all_ ? (german_ ? "Keine Skylander." : NL("No Skylanders."))
               : (german_ ? "Hier sind noch keine Figuren (Ordner Dokumente\\Skylanders\\Figures)."
-                         : "No figures here yet (folder Documents\\Skylanders\\Figures)."),
+                         : NL("No figures here yet (folder Documents\\Skylanders\\Figures).")),
          grid_w);
   }
   for (int i = first_row * cols; i < std::min(n, (first_row + rows_visible) * cols); ++i) {
@@ -894,18 +895,18 @@ void FiguresScreen::Draw(float width, float height) {
          Fit(regular_, 15 * u, Category(f.category, german_), tw));
     std::string line;
     if (fresh && !f.marked) {
-      line = german_ ? "noch nie gespielt" : "never played";
+      line = german_ ? "noch nie gespielt" : NL("never played");
     } else if (f.stats) {
       char text[64];
-      std::snprintf(text, sizeof(text), german_ ? "Stufe %u  \xC2\xB7  %u Gold" : "Level %u  \xC2\xB7  %u gold",
+      std::snprintf(text, sizeof(text), german_ ? "Stufe %u  \xC2\xB7  %u Gold" : NL("Level %u  \xC2\xB7  %u gold"),
                     unsigned(f.stats->level), unsigned(f.stats->gold));
       line = text;
     } else if (!f.owned) {
-      line = german_ ? "nicht dabei" : "not owned";
+      line = german_ ? "nicht dabei" : NL("not owned");
     } else if (f.marked) {
-      line = german_ ? "hab ich (ohne Datei)" : "I own it (no file)";
+      line = german_ ? "hab ich (ohne Datei)" : NL("I own it (no file)");
     } else {
-      line = german_ ? "noch nicht gespielt" : "not played yet";
+      line = german_ ? "noch nicht gespielt" : NL("not played yet");
     }
     Text(dl, regular_, 15 * u, {tx0, a.y + 62 * u}, f.stats && !fresh ? kGold : Rgba(150, 160, 190, alpha), line);
   }
@@ -920,7 +921,7 @@ void FiguresScreen::Draw(float width, float height) {
     }
     if (copy_targets_.empty()) {
       message_ = german_ ? "Es gibt kein anderes Profil (Profile: Back im Startbildschirm)."
-                         : "There is no other profile (Profiles: Back on the start screen).";
+                         : NL("There is no other profile (Profiles: Back on the start screen).");
       message_until_ = ImGui::GetTime() + 5.0;
     } else {
       copy_figure_ = *shown[selected_];
@@ -948,7 +949,7 @@ void FiguresScreen::Draw(float width, float height) {
     } else {
       // Say why nothing opens: the games leave a figure's tree once they have shown it.
       message_ = german_ ? "Noch kein Upgrade-Baum: Das Spiel legt ihn ab, wenn die Figur einmal darin war."
-                         : "No upgrade tree yet: the game leaves it once the figure has been in it.";
+                         : NL("No upgrade tree yet: the game leaves it once the figure has been in it.");
       message_until_ = ImGui::GetTime() + 5.0;
     }
   }
@@ -975,7 +976,7 @@ void FiguresScreen::Draw(float width, float height) {
     Text(dl, bold_, 26 * u, {x, y}, kWhite, f.name, w - 130 * u);
     y += 38 * u;
     std::string sub = f.game;
-    const std::string element = german_ ? std::string(ElementDe(f.element)) : std::string(sp::ElementName(f.element));
+    const std::string element = german_ ? std::string(ElementDe(f.element)) : NL(std::string(sp::ElementName(f.element)));
     if (!element.empty()) sub += (sub.empty() ? "" : "  \xC2\xB7  ") + element;
     // The element's symbol in front, when a game left one.
     float sub_x = x;
@@ -1003,10 +1004,10 @@ void FiguresScreen::Draw(float width, float height) {
           f.trap->villain_id ? sp::FindTrapVillain(f.trap->villain_id, f.trap->variant) : nullptr;
       std::string line;
       if (!villain) {
-        line = german_ ? "Leere Falle" : "Empty trap";
+        line = german_ ? "Leere Falle" : NL("Empty trap");
       } else {
-        line = (german_ ? "Gefangen: " : "Caught: ") + std::string(villain->name);
-        if (f.trap->evolved) line += german_ ? " (entwickelt)" : " (evolved)";
+        line = (german_ ? "Gefangen: " : NL("Caught: ")) + std::string(villain->name);
+        if (f.trap->evolved) line += german_ ? " (entwickelt)" : NL(" (evolved)");
       }
       Text(dl, bold_, 20 * u, {x, y}, villain ? Rgba(110, 220, 110) : kDim, line, w);
       y += 36 * u;
@@ -1014,7 +1015,7 @@ void FiguresScreen::Draw(float width, float height) {
     if (f.stats) {
       const sp::FigureStats& s = *f.stats;
       char text[96];
-      std::snprintf(text, sizeof(text), german_ ? "Stufe %u" : "Level %u", unsigned(s.level));
+      std::snprintf(text, sizeof(text), german_ ? "Stufe %u" : NL("Level %u"), unsigned(s.level));
       Text(dl, bold_, 24 * u, {x, y}, kGold, text);
       y += 34 * u;
       // The XP bar to the next level.
@@ -1034,15 +1035,15 @@ void FiguresScreen::Draw(float width, float height) {
       std::vector<Row> rows;
       auto row = [&](const char* label, const std::string& value) { rows.push_back({label, value}); };
       row("Gold", std::to_string(s.gold));
-      row(german_ ? "Spielzeit" : "Play time", PlayTime(s.play_seconds, german_));
+      row(german_ ? "Spielzeit" : NL("Play time"), PlayTime(s.play_seconds, german_));
       std::snprintf(text, sizeof(text), "%d", sp::UpgradeCount(s));
-      row(german_ ? "Upgrades" : "Upgrades", text);
+      row(german_ ? "Upgrades" : NL("Upgrades"), text);
       if (const int path = sp::UpgradePath(s)) {
-        row(german_ ? "Pfad" : "Path", path == 1 ? (german_ ? "erster" : "first") : (german_ ? "zweiter" : "second"));
+        row(german_ ? "Pfad" : NL("Path"), path == 1 ? (german_ ? "erster" : NL("first")) : (german_ ? "zweiter" : NL("second")));
       }
       if (!s.nickname.empty()) {
-        row(f.category == "Creation Crystals" ? (german_ ? "Imaginator" : "Imaginator")
-                                              : (german_ ? "Spitzname" : "Nickname"),
+        row(f.category == "Creation Crystals" ? (german_ ? "Imaginator" : NL("Imaginator"))
+                                              : (german_ ? "Spitzname" : NL("Nickname")),
             s.nickname);
       }
       // A creation crystal's battle class, chosen when its Imaginator was made (the game's number,
@@ -1054,21 +1055,21 @@ void FiguresScreen::Draw(float width, float height) {
             {"Bogenk\xC3\xA4" "mpfer", "Bowslinger"}, {"Panzerbrecher", "Bazooker"}, {"Zauberer", "Sorcerer"},
             {nullptr, nullptr},         {"Schmetterer", "Smasher"},                 {"Ninja", "Ninja"}};
         const uint8_t c = *s.creation_class;
-        if (c < 12 && kClassNames[c][0]) row(german_ ? "Klasse" : "Class", kClassNames[c][german_ ? 0 : 1]);
+        if (c < 12 && kClassNames[c][0]) row(german_ ? "Klasse" : NL("Class"), kClassNames[c][german_ ? 0 : 1]);
       }
       if (s.hat) {
         // The hat, as the games name it, with its picture and bonuses.
         auto hat = hats_.find(s.hat);
         const std::string name = hat != hats_.end() ? hat->second.name
-                                                    : (german_ ? "Nr. " : "No. ") + std::to_string(s.hat);
-        row(german_ ? "Hut" : "Hat", name);
+                                                    : (german_ ? "Nr. " : NL("No. ")) + std::to_string(s.hat);
+        row(german_ ? "Hut" : NL("Hat"), name);
         if (hat != hats_.end()) rows.back().hat = &hat->second;
       }
       // Hero points (Giants' and Swap Force's heroic challenges, 100 at most) and the consoles the
       // figure has been on, as the figure keeps them.
       if (s.hero_points) {
         std::snprintf(text, sizeof(text), "%u / 100", unsigned(s.hero_points));
-        row(german_ ? "Heldenpunkte" : "Hero points", text);
+        row(german_ ? "Heldenpunkte" : NL("Hero points"), text);
       }
       if (s.platforms) {
         std::string on;
@@ -1076,12 +1077,12 @@ void FiguresScreen::Draw(float width, float height) {
         for (int bit = 0; bit < 3; ++bit) {
           if (s.platforms & (1 << bit)) on += (on.empty() ? "" : ", ") + std::string(kPlatforms[bit]);
         }
-        if (!on.empty()) row(german_ ? "War auf" : "Played on", on);
+        if (!on.empty()) row(german_ ? "War auf" : NL("Played on"), on);
       }
       if (s.last_played) {
         std::snprintf(text, sizeof(text), "%02u.%02u.%04u", unsigned(s.last_played->day), unsigned(s.last_played->month),
                       unsigned(s.last_played->year));
-        row(german_ ? "Zuletzt gespielt" : "Last played", text);
+        row(german_ ? "Zuletzt gespielt" : NL("Last played"), text);
       }
       // Fitting them: closer together first, then without the hat's picture line, then the last
       // rows left out.
@@ -1114,14 +1115,14 @@ void FiguresScreen::Draw(float width, float height) {
       Text(dl, regular_, 18 * u, {x, y}, kDim,
            f.marked ? (german_ ? "Als \xE2\x80\x9E" "Hab ich\xE2\x80\x9C markiert; im Figurenordner ist keine Datei von ihm. "
                                  "Y nimmt die Markierung zur\xC3\xBC" "ck."
-                               : "Marked \"I own it\"; there is no file of it in the figure folder. Y takes the mark "
-                                 "back.")
+                               : NL("Marked \"I own it\"; there is no file of it in the figure folder. Y takes the mark "
+                                 "back."))
            : f.owned ? (german_ ? "Noch nicht gespielt: die Figur hat noch keinen Spielstand."
-                                : "Not played yet: the figure has no progress saved.")
-                     : !marks_enabled_ ? (german_ ? "Nicht in deinem Figurenordner." : "Not in your figure folder.")
+                                : NL("Not played yet: the figure has no progress saved."))
+                     : !marks_enabled_ ? (german_ ? "Nicht in deinem Figurenordner." : NL("Not in your figure folder."))
                      : (german_ ? "Nicht in deinem Figurenordner. Hast du ihn trotzdem? Y markiert ihn als "
                                   "\xE2\x80\x9E" "Hab ich\xE2\x80\x9C."
-                                : "Not in your figure folder. Do you have it anyway? Y marks it \"I own it\"."),
+                                : NL("Not in your figure folder. Do you have it anyway? Y marks it \"I own it\".")),
            w);
     }
     // The file's name at the bottom, below the rows (left out when they fill the panel).
@@ -1135,12 +1136,12 @@ void FiguresScreen::Draw(float width, float height) {
   char count[96];
   if (all_) {
     const int have = int(std::count_if(shown.begin(), shown.end(), [](const Figure* f) { return f->owned; }));
-    std::snprintf(count, sizeof(count), german_ ? "%d von %d dabei" : "%d of %d owned", have, n);
+    std::snprintf(count, sizeof(count), german_ ? "%d von %d dabei" : NL("%d of %d owned"), have, n);
   } else {
     const int played = int(std::count_if(shown.begin(), shown.end(), [](const Figure* f) { return f->played(); }));
     std::snprintf(count, sizeof(count),
-                  n == 1 ? (german_ ? "%d Figur  \xC2\xB7  %d gespielt" : "%d figure  \xC2\xB7  %d played")
-                         : (german_ ? "%d Figuren  \xC2\xB7  %d gespielt" : "%d figures  \xC2\xB7  %d played"),
+                  n == 1 ? (german_ ? "%d Figur  \xC2\xB7  %d gespielt" : NL("%d figure  \xC2\xB7  %d played"))
+                         : (german_ ? "%d Figuren  \xC2\xB7  %d gespielt" : NL("%d figures  \xC2\xB7  %d played")),
                   n, played);
   }
   Text(dl, regular_, 18 * u, {left, height - 82 * u}, kDim, count);
@@ -1152,20 +1153,20 @@ void FiguresScreen::Draw(float width, float height) {
   const float hy = height - 52 * u;
   // Smaller when it doesn't fit the window (handheld mode, a narrow window).
   const float hs = hint_row_.Size(22 * u);
-  hx = Hint(dl, bold_, hs, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Spiel" : "Game");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Spiel" : NL("Game"));
   if (!elements.empty()) hx = Hint(dl, bold_, hs, {hx, hy}, "LT/RT", Rgba(80, 90, 140), "Element");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Upgrades" : "Upgrades");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Upgrades" : NL("Upgrades"));
   hx = Hint(dl, bold_, hs, {hx, hy}, "X", Rgba(50, 120, 220),
-            all_ ? (german_ ? "Nur meine" : "Only mine") : (german_ ? "Alle Skylander" : "Every Skylander"));
+            all_ ? (german_ ? "Nur meine" : NL("Only mine")) : (german_ ? "Alle Skylander" : NL("Every Skylander")));
   if (n && (marks_enabled_ || !shown[selected_]->file.empty())) {
     const Figure& f = *shown[selected_];
     hx = Hint(dl, bold_, hs, {hx, hy}, "Y", Rgba(220, 180, 40),
-              !f.file.empty() ? (german_ ? "In anderes Profil kopieren" : "Copy to another profile")
-              : f.marked      ? (german_ ? "Hab ich nicht" : "I don't own it")
-                              : (german_ ? "Hab ich" : "I own it"));
+              !f.file.empty() ? (german_ ? "In anderes Profil kopieren" : NL("Copy to another profile"))
+              : f.marked      ? (german_ ? "Hab ich nicht" : NL("I don't own it"))
+                              : (german_ ? "Hab ich" : NL("I own it")));
   }
-  hx = Hint(dl, bold_, hs, {hx, hy}, "Back", Rgba(80, 90, 140), german_ ? "Rangliste" : "Leaderboard");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "Back", Rgba(80, 90, 140), german_ ? "Rangliste" : NL("Leaderboard"));
+  hx = Hint(dl, bold_, hs, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
   hint_row_.End(left, hx, width - 24 * u);
   ImGui::End();
 }
@@ -1220,7 +1221,7 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
         if (s.gold) entries.push_back({f, double(s.gold), text, {}});
         break;
       case 2:
-        std::snprintf(text, sizeof(text), german_ ? "Stufe %u  " "\xC2\xB7" "  %u XP" : "Level %u  " "\xC2\xB7" "  %u XP",
+        std::snprintf(text, sizeof(text), german_ ? "Stufe %u  " "\xC2\xB7" "  %u XP" : NL("Level %u  " "\xC2\xB7" "  %u XP"),
                       unsigned(s.level), unsigned(s.xp));
         if (s.xp) entries.push_back({f, double(s.xp), text, {}});
         break;
@@ -1252,11 +1253,11 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
         if (int(f->element) == e && f->stats->xp && (!best || f->stats->xp > best->stats->xp)) best = f;
       }
       if (!best) continue;
-      std::snprintf(text, sizeof(text), german_ ? "Stufe %u  " "\xC2\xB7" "  %u XP" : "Level %u  " "\xC2\xB7" "  %u XP",
+      std::snprintf(text, sizeof(text), german_ ? "Stufe %u  " "\xC2\xB7" "  %u XP" : NL("Level %u  " "\xC2\xB7" "  %u XP"),
                     unsigned(best->stats->level), unsigned(best->stats->xp));
       const sp::Element el = sp::Element(e);
       entries.push_back({best, double(100 - e), text,
-                         german_ ? std::string(ElementDe(el)) : std::string(sp::ElementName(el))});
+                         german_ ? std::string(ElementDe(el)) : NL(std::string(sp::ElementName(el)))});
     }
   }
   if (board_list_ == 7) {
@@ -1296,17 +1297,17 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
         case 0: std::snprintf(text, sizeof(text), "%s", PlayTime(s.play_seconds, german_).c_str()); break;
         case 1:
         case 6:
-          std::snprintf(text, sizeof(text), german_ ? "Stufe %u  " "\xC2\xB7" "  %u XP" : "Level %u  " "\xC2\xB7" "  %u XP",
+          std::snprintf(text, sizeof(text), german_ ? "Stufe %u  " "\xC2\xB7" "  %u XP" : NL("Level %u  " "\xC2\xB7" "  %u XP"),
                         unsigned(s.level), unsigned(s.xp));
           break;
         case 2: std::snprintf(text, sizeof(text), "%u Gold", unsigned(s.gold)); break;
         case 3: std::snprintf(text, sizeof(text), "%d Upgrades", sp::UpgradeCount(s)); break;
-        case 4: std::snprintf(text, sizeof(text), german_ ? "%u Heldenpunkte" : "%u hero points", unsigned(s.hero_points)); break;
+        case 4: std::snprintf(text, sizeof(text), german_ ? "%u Heldenpunkte" : NL("%u hero points"), unsigned(s.hero_points)); break;
         default:
-          std::snprintf(text, sizeof(text), german_ ? "auf %d Konsolen" : "on %d consoles", int(best_score));
+          std::snprintf(text, sizeof(text), german_ ? "auf %d Konsolen" : NL("on %d consoles"), int(best_score));
           break;
       }
-      entries.push_back({best, double(100 - int(t)), text, german_ ? kTitles[t].de : kTitles[t].en});
+      entries.push_back({best, double(100 - int(t)), text, german_ ? kTitles[t].de : NL(kTitles[t].en)});
     }
   }
   std::stable_sort(entries.begin(), entries.end(), [](const Entry& a, const Entry& b) { return a.value > b.value; });
@@ -1325,12 +1326,12 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
     for (const auto& [el, s] : by_element) {
       if (s > most) {
         most = s;
-        favourite = german_ ? ElementDe(el) : std::string(sp::ElementName(el));
+        favourite = german_ ? ElementDe(el) : NL(std::string(sp::ElementName(el)));
       }
     }
-    std::string line = (german_ ? "Gesamt: " : "In all: ") + PlayTime(uint32_t(std::min<uint64_t>(seconds, UINT32_MAX)), german_) +
+    std::string line = (german_ ? "Gesamt: " : NL("In all: ")) + PlayTime(uint32_t(std::min<uint64_t>(seconds, UINT32_MAX)), german_) +
                        "  " "\xC2\xB7" "  " + std::to_string(gold) + " Gold";
-    if (!favourite.empty()) line += std::string("  " "\xC2\xB7" "  ") + (german_ ? "Lieblingselement: " : "Favourite element: ") + favourite;
+    if (!favourite.empty()) line += std::string("  " "\xC2\xB7" "  ") + (german_ ? "Lieblingselement: " : NL("Favourite element: ")) + favourite;
     Text(dl, regular_, 20 * u, {48 * u, 112 * u}, kDim, line);
   }
   // The lists as tabs.
@@ -1338,7 +1339,7 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
   float tx = left;
   const float ty = 146 * u;
   for (int i = 0; i < kCount; ++i) {
-    const std::string name = german_ ? kLists[i].de : kLists[i].en;
+    const std::string name = german_ ? kLists[i].de : NL(kLists[i].en);
     const float w = TextWidth(bold_, 18 * u, name) + 26 * u;
     if (tx + w > right) break;
     const bool on = i == board_list_;
@@ -1362,7 +1363,7 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
   if (!n) {
     Text(dl, regular_, 22 * u, {left, top + 10 * u}, kDim,
          german_ ? "Noch keine Figur mit Fortschritt: einmal spielen, dann steht sie hier."
-                 : "No figure with progress yet: play one, then it shows here.");
+                 : NL("No figure with progress yet: play one, then it shows here."));
   }
   static const ImU32 kMedals[] = {Rgba(255, 204, 64), Rgba(200, 210, 225), Rgba(205, 127, 50)};
   for (int i = board_scroll_; i < n && i < board_scroll_ + visible; ++i) {
@@ -1402,8 +1403,8 @@ void FiguresScreen::DrawBoard(float width, float height, float u) {
   }
   float hx = left;
   const float hy = height - 52 * u;
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Liste" : "List");
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur" "\xC3\xBC" "ck" : "Back");
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Liste" : NL("List"));
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur" "\xC3\xBC" "ck" : NL("Back"));
 }
 
 void FiguresScreen::DrawCopy(float width, float height, float u) {
@@ -1423,10 +1424,10 @@ void FiguresScreen::DrawCopy(float width, float height, float u) {
   dl->AddRectFilled(a, {a.x + pw, a.y + ph}, kPanel, 18 * u);
   dl->AddRect(a, {a.x + pw, a.y + ph}, kGold, 18 * u, 0, 3 * u);
   Text(dl, bold_, 26 * u, {a.x + 28 * u, a.y + 20 * u}, kGold,
-       Fit(bold_, 26 * u, (german_ ? "Kopieren: " : "Copy: ") + copy_figure_.name, pw - 56 * u));
+       Fit(bold_, 26 * u, (german_ ? "Kopieren: " : NL("Copy: ")) + copy_figure_.name, pw - 56 * u));
   Text(dl, regular_, 18 * u, {a.x + 28 * u, a.y + 58 * u}, kDim,
        german_ ? "In welches Profil? Die Figur bleibt auch hier, wie sie ist."
-               : "Into which profile? The figure stays here as well, as it is.");
+               : NL("Into which profile? The figure stays here as well, as it is."));
   for (int i = 0; i < n; ++i) {
     const float y = a.y + 96 * u + row * float(i);
     if (i == copy_target_) {
@@ -1438,7 +1439,7 @@ void FiguresScreen::DrawCopy(float width, float height, float u) {
     const Profile& target = copy_targets_[size_t(copy_target_)];
     std::error_code ec;
     fs::path rel = fs::relative(copy_figure_.file.parent_path(), figures_dir_, ec);
-    if (ec || rel.empty() || rel.native().starts_with(L"..")) rel.clear();
+    if (ec || rel.empty() || *rel.begin() == "..") rel.clear();
     const fs::path dir = ProfileFiguresDir(target) / rel;
     fs::create_directories(dir, ec);
     const std::u8string stem = copy_figure_.file.stem().u8string();
@@ -1446,8 +1447,8 @@ void FiguresScreen::DrawCopy(float width, float height, float u) {
     // Keep the file's own extension (.sky, .bin) when it isn't .dump.
     if (copy_figure_.file.extension() != ".dump") dest.replace_extension(copy_figure_.file.extension());
     const bool copied = !fs::exists(dest, ec) && fs::copy_file(copy_figure_.file, dest, ec) && !ec;
-    message_ = copied ? (german_ ? "Kopiert ins Profil " : "Copied to the profile ") + target.name
-                      : (german_ ? "Konnte nicht kopieren" : "Could not copy");
+    message_ = copied ? (german_ ? "Kopiert ins Profil " : NL("Copied to the profile ")) + target.name
+                      : (german_ ? "Konnte nicht kopieren" : NL("Could not copy"));
     message_until_ = ImGui::GetTime() + 5.0;
     copying_ = false;
   } else if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) {
@@ -1455,8 +1456,8 @@ void FiguresScreen::DrawCopy(float width, float height, float u) {
   }
   float hx = 48 * u;
   const float hy = height - 52 * u;
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Kopieren" : "Copy");
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Abbrechen" : "Cancel");
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Kopieren" : NL("Copy"));
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Abbrechen" : NL("Cancel"));
 }
 
 }  // namespace coreoflight

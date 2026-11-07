@@ -7,6 +7,9 @@
 // the running exe and its DLLs included, are renamed to <name>.old (Windows lets a running program
 // be renamed, not overwritten) and the new ones put in their place; the next start deletes the
 // .old files. The data stays where it always is (Documents\Skylanders).
+//
+// On Linux the launcher is always this ZIP (CoreOfLight-linux-x86_64-<version>.zip, made by
+// tools/package_linux.sh), the same update: a running program can be renamed there as well.
 
 #include <filesystem>
 #include <string>
@@ -14,7 +17,11 @@
 namespace coreoflight {
 
 // The release asset a portable launcher updates from: <kPortablePrefix>-<version><kPortableExtension>.
+#ifdef _WIN32
 inline constexpr char kPortablePrefix[] = "CoreOfLightPortable";
+#else
+inline constexpr char kPortablePrefix[] = "CoreOfLight-linux-x86_64";
+#endif
 inline constexpr char kPortableExtension[] = ".zip";
 
 // Whether the launcher in `launcher_dir` is the portable one (portable.txt next to it).

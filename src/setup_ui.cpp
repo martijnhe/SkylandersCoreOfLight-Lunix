@@ -1,7 +1,12 @@
 #include "setup_ui.h"
 #include "hints.h"
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
@@ -16,6 +21,8 @@
 #include "imgui.h"
 #include "nxe_art.h"
 #include "xiso.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -87,9 +94,9 @@ std::optional<uint64_t> FreeBytes(fs::path path) {
     if (path == path.parent_path()) break;
     path = path.parent_path();
   }
-  ULARGE_INTEGER free{};
-  if (!GetDiskFreeSpaceExW(path.c_str(), &free, nullptr, nullptr)) return std::nullopt;
-  return free.QuadPart;
+  const fs::space_info space = fs::space(path, ec);
+  if (ec) return std::nullopt;
+  return uint64_t(space.available);
 }
 
 bool Pressed(ImGuiKey key) { return ImGui::IsKeyPressed(key, true); }
@@ -145,6 +152,7 @@ void SetupScreen::Open() {
 void SetupScreen::FindGameFolders() {
   folders_ = {std::filesystem::path()};
   folder_ = 0;
+#ifdef _WIN32
   wchar_t windows[MAX_PATH] = L"";
   GetWindowsDirectoryW(windows, MAX_PATH);
   const std::wstring system_drive = std::filesystem::path(windows).root_name().wstring();
@@ -165,6 +173,30 @@ void SetupScreen::FindGameFolders() {
     }
     folders_.push_back(dir);
   }
+#else
+  // Off Windows: the other drives the desktop mounted for this user (a Steam Deck's microSD card,
+  // a USB disk: /run/media/<user>/<name>, /media/<user>/<name>, also /run/media/<name> as SteamOS
+  // mounts the card), each with a "Skylanders Recompiled" folder, where the launcher may write.
+  const std::string user = platform::Env("USER");
+  std::vector<std::filesystem::path> bases = {"/run/media"};
+  if (!user.empty()) {
+    bases.push_back(std::filesystem::path("/run/media") / user);
+    bases.push_back(std::filesystem::path("/media") / user);
+  }
+  for (const std::filesystem::path& base : bases) {
+    std::error_code ec;
+    for (auto it = std::filesystem::directory_iterator(base, ec); !ec && it != std::filesystem::directory_iterator();
+         it.increment(ec)) {
+      std::error_code type_ec;
+      if (!it->is_directory(type_ec) || it->path() == bases.back() || (!user.empty() && it->path().filename() == user)) {
+        continue;
+      }
+      if (access(it->path().c_str(), W_OK) != 0) continue;
+      const std::filesystem::path dir = it->path() / "Skylanders Recompiled";
+      if (std::find(folders_.begin(), folders_.end(), dir) == folders_.end()) folders_.push_back(dir);
+    }
+  }
+#endif
   // One set before (an earlier setup, coreoflight.ini, --install_dir) is chosen, and kept.
   if (GamesFolderChosen()) {
     const auto it = std::find(folders_.begin(), folders_.end(), GamesFolder());
@@ -223,7 +255,7 @@ void SetupScreen::AddIso(const std::filesystem::path& iso) {
   const XisoImage::Entry* xex = image ? image->Find("default.xex") : nullptr;
   std::vector<uint8_t> data;
   if (!xex || !image->Read(*xex, data)) {
-    message_ = german_ ? "Das ist keine Xbox-360-Disc (ISO)." : "That isn't an Xbox 360 disc (ISO).";
+    message_ = german_ ? "Das ist keine Xbox-360-Disc (ISO)." : NL("That isn't an Xbox 360 disc (ISO).");
     return;
   }
   const XexId id = IdentifyXex(data.data(), data.size());
@@ -240,8 +272,8 @@ void SetupScreen::AddIso(const std::filesystem::path& iso) {
     message_.clear();
     if (pick_for_ >= 0 && size_t(pick_for_) != i) {
       const Game& g = AllGames()[i];
-      message_ = (german_ ? "Das ist die Disc von " : "That is the disc of ") + std::string(german_ ? g.name_de : g.name_en) +
-                 (german_ ? ": dort eingetragen." : ": filled in there.");
+      message_ = (german_ ? "Das ist die Disc von " : NL("That is the disc of ")) + std::string(german_ ? g.name_de : g.name_en) +
+                 (german_ ? ": dort eingetragen." : NL(": filled in there."));
     }
     selected_ = int(i);
     pick_for_ = -1;
@@ -257,7 +289,7 @@ void SetupScreen::AddIso(const std::filesystem::path& iso) {
     return;
   }
   message_ = german_ ? "Diese Disc-Version unterst\xC3\xBCtzt keines der Spiele."
-                     : "None of the games supports this disc version.";
+                     : NL("None of the games supports this disc version.");
 }
 
 uint64_t SetupScreen::NeededBytes() const {
@@ -306,31 +338,31 @@ void SetupScreen::DrawWelcome(float width, float height) {
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const float u = UiScale(width, height);
   DrawBackdrop(dl, width, height, {});
-  Title(dl, bold_, u, german_ ? "WILLKOMMEN" : "WELCOME");
+  Title(dl, bold_, u, german_ ? "WILLKOMMEN" : NL("WELCOME"));
   const float left = 48 * u, wrap = std::min(width - 2 * left, 900 * u);
   Text(dl, regular_, 24 * u, {left, 150 * u}, kWhite,
        german_ ? "Hier spielst du alle sechs Skylanders-Spiele der Xbox 360 auf dem PC. Die Einrichtung "
                  "dauert nur einen Moment: Core of Light sucht deine Discs (ISO-Dateien), zeigt, wie viel "
                  "Platz sie brauchen, und installiert die Spiele dazu."
-               : "Here you play all six Xbox 360 Skylanders games on the PC. Setting up takes a moment: "
+               : NL("Here you play all six Xbox 360 Skylanders games on the PC. Setting up takes a moment: "
                  "Core of Light looks for your discs (ISO files), shows the room they need and installs "
-                 "the games for them.",
+                 "the games for them."),
        left + wrap);
   Text(dl, regular_, 20 * u, {left, 270 * u}, kDim,
        german_ ? "Spieldaten sind nicht dabei: es braucht deine eigenen Discs als ISO."
-               : "No game data comes with it: it needs your own discs as ISOs.",
+               : NL("No game data comes with it: it needs your own discs as ISOs."),
        left + wrap);
   // The language, left / right.
   const float y = 320 * u;
-  const std::string label = german_ ? "Sprache" : "Language";
+  const std::string label = german_ ? "Sprache" : NL("Language");
   Text(dl, bold_, 24 * u, {left, y + 9 * u}, kWhite, label);
   const float bx = left + 260 * u;
-  Button(dl, bold_, u, bx, y, 200 * u, "<  " + std::string(german_ ? "Deutsch" : "English") + "  >", selected_ == 0);
+  Button(dl, bold_, u, bx, y, 200 * u, "<  " + std::string(Dutch() ? "Nederlands" : german_ ? "Deutsch" : "English") + "  >", selected_ == 0);
   // Where the saves and figures go (the owner's call, 2026-10-24): one folder for every game,
   // Documents\Skylanders unless another is picked here (A: the folder browser).
   {
     const float dy = y + 70 * u;
-    Text(dl, bold_, 24 * u, {left, dy + 9 * u}, kWhite, german_ ? "Spieldaten" : "Game data");
+    Text(dl, bold_, 24 * u, {left, dy + 9 * u}, kWhite, german_ ? "Spieldaten" : NL("Game data"));
     std::string en, de;
     DataFolderLabels(en, de);
     const std::string where = german_ ? de : en;
@@ -339,15 +371,20 @@ void SetupScreen::DrawWelcome(float width, float height) {
     Button(dl, bold_, u, bx, dy, w, FitStart(bold_, 22 * u, where, w - 48 * u), selected_ == 1);
     Text(dl, regular_, 18 * u, {bx, dy + 58 * u}, kDim,
          german_ ? "Spielst\xC3\xA4nde, Erfolge und Figuren aller Spiele  \xC2\xB7  A: anderer Ordner"
-                 : "Saves, achievements and figures of every game  \xC2\xB7  A: another folder");
+                 : NL("Saves, achievements and figures of every game  \xC2\xB7  A: another folder"));
   }
-  Button(dl, bold_, u, left, y + 180 * u, 380 * u, german_ ? "Weiter: Discs suchen" : "Next: find my discs",
+  Button(dl, bold_, u, left, y + 180 * u, 380 * u, german_ ? "Weiter: Discs suchen" : NL("Next: find my discs"),
          selected_ == 2);
   if (Up() && selected_ > 0) --selected_;
   if (Down() && selected_ < 2) ++selected_;
   if (selected_ == 0 && (Left() || Right() || Accept())) {
-    german_ = !german_;
-    language_ = german_ ? "german" : "english";
+    // English, Deutsch, Nederlands, round (right) or back (left).
+    const char* order[] = {"english", "german", "dutch"};
+    const int now = Dutch() ? 2 : german_ ? 1 : 0;
+    const int next = (now + (Left() ? 2 : 1)) % 3;
+    language_ = order[next];
+    german_ = next == 1;
+    SetDutch(next == 2);
   } else if (selected_ == 1 && Accept()) {
     job_ = {Job::Kind::kPickDataFolder, 0, {}};
   } else if (selected_ == 2 && Accept()) {
@@ -360,15 +397,15 @@ void SetupScreen::DrawWelcome(float width, float height) {
   }
   float hx = 48 * u;
   const float hy = height - 52 * u;
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 160, 70), german_ ? "Weiter" : "Next");
-  Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "\xC3\x9C" "berspringen" : "Skip");
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 160, 70), german_ ? "Weiter" : NL("Next"));
+  Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "\xC3\x9C" "berspringen" : NL("Skip"));
 }
 
 void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher) {
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const float u = UiScale(width, height);
   DrawBackdrop(dl, width, height, {});
-  Title(dl, bold_, u, german_ ? "DEINE DISCS" : "YOUR DISCS");
+  Title(dl, bold_, u, german_ ? "DEINE DISCS" : NL("YOUR DISCS"));
   const float left = 48 * u, right = width - 48 * u;
   // Nothing is looked for unasked (the owner, 2026-10-23): A on a game chooses its ISO, then its
   // folder and the one above are looked through for the others; Y searches the whole PC.
@@ -382,18 +419,18 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
     if (!search_) {
       std::snprintf(text, sizeof(text), "%s",
                     german_ ? "A auf einem Spiel: seine ISO w\xC3\xA4hlen. Die anderen sucht Core of Light dann im selben Ordner."
-                            : "A on a game: choose its ISO. Core of Light then looks for the others in the same folder.");
+                            : NL("A on a game: choose its ISO. Core of Light then looks for the others in the same folder."));
     } else if (done && nearby_) {
       std::snprintf(text, sizeof(text), german_ ? "Daneben gesucht: %d von 6 Spielen zugeordnet. Stimmt eines nicht: A darauf, andere ISO w\xC3\xA4hlen."
-                                                : "Looked next to it: %d of 6 games filled in. One wrong: A on it, another ISO.",
+                                                : NL("Looked next to it: %d of 6 games filled in. One wrong: A on it, another ISO."),
                     games);
     } else if (done) {
       std::snprintf(text, sizeof(text), german_ ? "Suche fertig: %d ISOs, %d von 6 Spielen gefunden"
-                                                : "Search done: %d ISOs, %d of 6 games found",
+                                                : NL("Search done: %d ISOs, %d of 6 games found"),
                     isos, games);
     } else {
       std::snprintf(text, sizeof(text), german_ ? "Suche l\xC3\xA4uft ...  %d Ordner, %d ISOs"
-                                                : "Searching ...  %d folders, %d ISOs",
+                                                : NL("Searching ...  %d folders, %d ISOs"),
                     folders, isos);
     }
     Text(dl, regular_, 20 * u, {left, 128 * u}, done || !search_ ? kDim : kGold, text);
@@ -424,7 +461,7 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
     ImU32 col = kDim;
     switch (r.state) {
       case State::kReady:
-        state = german_ ? "Schon eingerichtet" : "Set up already";
+        state = german_ ? "Schon eingerichtet" : NL("Set up already");
         col = kGreen;
         break;
       case State::kFound: {
@@ -434,7 +471,7 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
         Text(dl, bold_, 20 * u, {sx, y + 17 * u}, col, size);
         float px = sx + TextWidth(bold_, 20 * u, size) + 16 * u;
         if (r.automatic) {
-          const std::string tag = german_ ? "automatisch erkannt" : "found automatically";
+          const std::string tag = german_ ? "automatisch erkannt" : NL("found automatically");
           Text(dl, bold_, 16 * u, {px, y + 21 * u}, kGold, tag);
           px += TextWidth(bold_, 16 * u, tag) + 14 * u;
         }
@@ -442,9 +479,9 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
         break;
       }
       default:
-        state = !search_ ? (german_ ? "Noch keine Disc  \xC2\xB7  A: ISO w\xC3\xA4hlen" : "No disc yet  \xC2\xB7  A: choose its ISO")
-                : search_->done ? (german_ ? "Keine Disc gefunden  \xC2\xB7  A: ISO w\xC3\xA4hlen" : "No disc found  \xC2\xB7  A: choose its ISO")
-                                : (german_ ? "Wird gesucht ..." : "Looking ...");
+        state = !search_ ? (german_ ? "Noch keine Disc  \xC2\xB7  A: ISO w\xC3\xA4hlen" : NL("No disc yet  \xC2\xB7  A: choose its ISO"))
+                : search_->done ? (german_ ? "Keine Disc gefunden  \xC2\xB7  A: ISO w\xC3\xA4hlen" : NL("No disc found  \xC2\xB7  A: choose its ISO"))
+                                : (german_ ? "Wird gesucht ..." : NL("Looking ..."));
         break;
     }
     if (!state.empty()) {
@@ -470,11 +507,11 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
     const bool on = selected_ == n;
     dl->AddRectFilled({left, y}, {right, y + row_h}, kPanel, 12 * u);
     dl->AddRect({left, y}, {right, y + row_h}, on ? kGold : kEdge, 12 * u, 0, (on ? 3.0f : 1.5f) * u);
-    Text(dl, bold_, 22 * u, {left + 22 * u, y + 17 * u}, kWhite, german_ ? "Spiele-Ordner" : "Games folder");
+    Text(dl, bold_, 22 * u, {left + 22 * u, y + 17 * u}, kWhite, german_ ? "Spiele-Ordner" : NL("Games folder"));
     const bool standard = folder_ <= 0 || folders_.empty();
-    const std::string where = (standard ? (german_ ? "Standard: " : "Default: ") : std::string()) + Utf8(GamesFolder());
+    const std::string where = (standard ? (german_ ? "Standard: " : NL("Default: ")) : std::string()) + Utf8(GamesFolder());
     const std::optional<uint64_t> folder_free = FreeBytes(GamesFolder());
-    const std::string room_text = folder_free ? "  \xC2\xB7  " + Gigabytes(*folder_free, german_) + (german_ ? " frei" : " free")
+    const std::string room_text = folder_free ? "  \xC2\xB7  " + Gigabytes(*folder_free, german_) + (german_ ? " frei" : NL(" free"))
                                               : std::string();
     const std::string value = (on && folders_.size() > 1 ? "<  " : "") + where + room_text + (on && folders_.size() > 1 ? "  >" : "");
     Text(dl, regular_, 20 * u, {left + 360 * u, y + 17 * u}, on ? kGold : kDim,
@@ -482,20 +519,20 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
   }
   const float sy = top + (n + 1) * (row_h + 4 * u) + 10 * u;
   if (needed) {
-    const std::string text = (german_ ? "Braucht " : "Needs ") + Gigabytes(needed, german_) + "  \xC2\xB7  " +
-                             (free ? (german_ ? "frei auf " : "free on ") + drive + " " + Gigabytes(*free, german_)
+    const std::string text = (german_ ? "Braucht " : NL("Needs ")) + Gigabytes(needed, german_) + "  \xC2\xB7  " +
+                             (free ? (german_ ? "frei auf " : NL("free on ")) + drive + " " + Gigabytes(*free, german_)
                                    : std::string());
     Text(dl, bold_, 22 * u, {left, sy}, room ? kGreen : kRed, text);
     if (!room) {
       Text(dl, regular_, 19 * u, {left, sy + 30 * u}, kRed,
            german_ ? "Nicht genug Platz: weniger Spiele w\xC3\xA4hlen oder auf dem Laufwerk Platz schaffen."
-                   : "Not enough room: choose fewer games or free some space on the drive.");
+                   : NL("Not enough room: choose fewer games or free some space on the drive."));
     }
   }
   int chosen = 0;
   for (const Row& r : rows_) chosen += r.chosen ? 1 : 0;
-  const std::string go = chosen ? (german_ ? "Einrichten" : "Set up")
-                                : (german_ ? "Ohne Disc weiter" : "Continue without a disc");
+  const std::string go = chosen ? (german_ ? "Einrichten" : NL("Set up"))
+                                : (german_ ? "Ohne Disc weiter" : NL("Continue without a disc"));
   const float go_y = sy + (room ? 44 : 64) * u;
   if (!message_.empty()) Text(dl, regular_, 19 * u, {left + 340 * u, go_y + 12 * u}, kRed, message_);
   Button(dl, bold_, u, left, go_y, 320 * u, go, selected_ == n + 1, room);
@@ -545,12 +582,12 @@ void SetupScreen::DrawDiscs(float width, float height, const Launcher& launcher)
   float hx = 48 * u;
   const float hy = height - 52 * u;
   hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 160, 70),
-            selected_ < n ? (german_ ? "ISO w\xC3\xA4hlen" : "Choose its ISO")
-            : selected_ == n ? (german_ ? "Anderer Ordner" : "Another folder")
+            selected_ < n ? (german_ ? "ISO w\xC3\xA4hlen" : NL("Choose its ISO"))
+            : selected_ == n ? (german_ ? "Anderer Ordner" : NL("Another folder"))
                              : go);
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(60, 110, 220), german_ ? "An / aus" : "On / off");
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(200, 170, 40), german_ ? "Ganzen PC durchsuchen" : "Search the whole PC");
-  Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(60, 110, 220), german_ ? "An / aus" : NL("On / off"));
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(200, 170, 40), german_ ? "Ganzen PC durchsuchen" : NL("Search the whole PC"));
+  Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
 }
 
 // The queue: each chosen game installed (when it isn't) and its disc set up, one after the other.
@@ -565,7 +602,7 @@ void SetupScreen::Advance(const Launcher& launcher) {
       if (found[size_t(current_)].exe.empty()) {
         r.state = State::kFailed;
         r.note = GameInstallError(size_t(current_));
-        if (r.note.empty()) r.note = german_ ? "Installation abgebrochen" : "Installation stopped";
+        if (r.note.empty()) r.note = german_ ? "Installation abgebrochen" : NL("Installation stopped");
         current_ = -1;
       } else {
         r.state = State::kImporting;
@@ -591,7 +628,7 @@ void SetupScreen::Advance(const Launcher& launcher) {
     if (found[i].exe.empty()) {
       if (!launcher.setups || i >= launcher.setups->size() || (*launcher.setups)[i].empty()) {
         r.state = State::kFailed;
-        r.note = german_ ? "Kein Setup gefunden (keine Verbindung zu GitHub?)" : "No setup found (no connection to GitHub?)";
+        r.note = german_ ? "Kein Setup gefunden (keine Verbindung zu GitHub?)" : NL("No setup found (no connection to GitHub?)");
         current_ = -1;
         continue;
       }
@@ -611,7 +648,7 @@ void SetupScreen::DrawWork(float width, float height, const Launcher& launcher) 
   const float u = UiScale(width, height);
   DrawBackdrop(dl, width, height, {});
   const bool done = page_ == Page::kDone;
-  Title(dl, bold_, u, done ? (german_ ? "FERTIG" : "DONE") : (german_ ? "EINRICHTEN" : "SETTING UP"));
+  Title(dl, bold_, u, done ? (german_ ? "FERTIG" : NL("DONE")) : (german_ ? "EINRICHTEN" : NL("SETTING UP")));
   const float left = 48 * u, right = width - 48 * u;
   float y = 140 * u;
   int ok = 0, failed = 0;
@@ -631,16 +668,16 @@ void SetupScreen::DrawWork(float width, float height, const Launcher& launcher) 
     ImU32 col = kDim;
     switch (r.state) {
       case State::kWaiting:
-        state = stopping_ ? (german_ ? "Abgebrochen" : "Stopped") : (german_ ? "Wartet" : "Waiting");
+        state = stopping_ ? (german_ ? "Abgebrochen" : NL("Stopped")) : (german_ ? "Wartet" : NL("Waiting"));
         break;
       case State::kInstalling:
-        state = german_ ? "Wird installiert ..." : "Installing ...";
+        state = german_ ? "Wird installiert ..." : NL("Installing ...");
         col = kGold;
         break;
       case State::kImporting: {
         const float p = std::clamp(launcher.import ? launcher.import->progress() : 0.0f, 0.0f, 1.0f);
         char text[64];
-        std::snprintf(text, sizeof(text), german_ ? "Disc wird eingelesen ...  %d %%" : "Setting up the disc ...  %d %%",
+        std::snprintf(text, sizeof(text), german_ ? "Disc wird eingelesen ...  %d %%" : NL("Setting up the disc ...  %d %%"),
                       int(p * 100));
         state = text;
         col = kGold;
@@ -650,7 +687,7 @@ void SetupScreen::DrawWork(float width, float height, const Launcher& launcher) 
         break;
       }
       case State::kDone:
-        state = german_ ? "Bereit zum Spielen" : "Ready to play";
+        state = german_ ? "Bereit zum Spielen" : NL("Ready to play");
         col = kGreen;
         ++ok;
         break;
@@ -668,16 +705,16 @@ void SetupScreen::DrawWork(float width, float height, const Launcher& launcher) 
   if (done) {
     char text[160];
     std::snprintf(text, sizeof(text),
-                  german_ ? "%d Spiel(e) bereit%s. A: zu den Spielen" : "%d game(s) ready%s. A: to the games", ok,
+                  german_ ? "%d Spiel(e) bereit%s. A: zu den Spielen" : NL("%d game(s) ready%s. A: to the games"), ok,
                   failed ? (german_ ? ", bei den roten hat es nicht geklappt (Karte: A versucht es noch einmal)"
-                                    : ", the red ones failed (their card's A tries again)")
+                                    : NL(", the red ones failed (their card's A tries again)"))
                          : "");
     Text(dl, bold_, 22 * u, {left, y + 16 * u}, ok ? kGreen : kDim, text, right);
     if (Accept() || Back()) {
       finished_ = true;
       open_ = false;
     }
-    Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 160, 70), german_ ? "Zu den Spielen" : "To the games");
+    Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 160, 70), german_ ? "Zu den Spielen" : NL("To the games"));
   } else {
     if (Back() && !stopping_) {
       // Stops after the step running now: the disc being unpacked stops at once (it isn't set up then).
@@ -685,7 +722,7 @@ void SetupScreen::DrawWork(float width, float height, const Launcher& launcher) 
       if (current_ >= 0 && rows_[size_t(current_)].state == State::kImporting) job_ = {Job::Kind::kCancel, 0, {}};
     }
     Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60),
-         stopping_ ? (german_ ? "Wird angehalten ..." : "Stopping ...") : (german_ ? "Abbrechen" : "Stop"));
+         stopping_ ? (german_ ? "Wird angehalten ..." : NL("Stopping ...")) : (german_ ? "Abbrechen" : NL("Stop")));
   }
 }
 

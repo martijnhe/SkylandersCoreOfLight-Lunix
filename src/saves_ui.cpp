@@ -1,8 +1,10 @@
 #include "saves_ui.h"
 #include "hints.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -12,6 +14,8 @@
 #include "imgui.h"
 #include "nxe_art.h"
 #include "profiles.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -44,62 +48,57 @@ float Hint(ImDrawList* dl, ImFont* font, float size, ImVec2 pos, const char* but
 }
 
 // A local date's day number, to tell today and yesterday.
-int64_t DayNumber(const SYSTEMTIME& t) {
-  SYSTEMTIME day = t;
-  day.wHour = day.wMinute = day.wSecond = day.wMilliseconds = 0;
-  FILETIME ft{};
-  SystemTimeToFileTime(&day, &ft);
-  return int64_t((uint64_t(ft.dwHighDateTime) << 32 | ft.dwLowDateTime) / 864000000000ULL);
+int64_t DayNumber(const platform::LocalTime& t) {
+  // Days since 1970-01-01 of the civil date (Howard Hinnant's days_from_civil).
+  const int y = t.year - (t.month <= 2);
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const int yoe = y - era * 400;
+  const int doy = (153 * (t.month + (t.month > 2 ? -3 : 9)) + 2) / 5 + t.day - 1;
+  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return int64_t(era) * 146097 + doe - 719468;
 }
 
 // A Windows file time as the player reads it: "heute, 22:32", "gestern, 08:15" or "23.10.2026, 12:30"
 // ("today, 22:32", "yesterday, ...", "2026-10-23, 12:30").
 std::string When(uint64_t file_time, bool german) {
-  FILETIME ft{DWORD(file_time & 0xFFFFFFFF), DWORD(file_time >> 32)};
-  SYSTEMTIME utc{}, local{}, now{};
-  if (!file_time || !FileTimeToSystemTime(&ft, &utc) || !SystemTimeToTzSpecificLocalTime(nullptr, &utc, &local)) {
-    return "?";
-  }
-  GetLocalTime(&now);
+  platform::LocalTime local;
+  if (!platform::ToLocalTime(file_time, local)) return "?";
+  const platform::LocalTime now = platform::LocalNow();
   char clock[8];
-  std::snprintf(clock, sizeof(clock), "%02u:%02u", local.wHour, local.wMinute);
+  std::snprintf(clock, sizeof(clock), "%02d:%02d", local.hour, local.minute);
   const int64_t days = DayNumber(now) - DayNumber(local);
-  if (days == 0) return std::string(german ? "heute, " : "today, ") + clock;
-  if (days == 1) return std::string(german ? "gestern, " : "yesterday, ") + clock;
+  if (days == 0) return std::string(german ? "heute, " : NL("today, ")) + clock;
+  if (days == 1) return std::string(german ? "gestern, " : NL("yesterday, ")) + clock;
   char text[40];
   if (german) {
-    std::snprintf(text, sizeof(text), "%02u.%02u.%04u, %s", local.wDay, local.wMonth, local.wYear, clock);
+    std::snprintf(text, sizeof(text), "%02d.%02d.%04d, %s", local.day, local.month, local.year, clock);
   } else {
-    std::snprintf(text, sizeof(text), "%04u-%02u-%02u, %s", local.wYear, local.wMonth, local.wDay, clock);
+    std::snprintf(text, sizeof(text), "%04d-%02d-%02d, %s", local.year, local.month, local.day, clock);
   }
   return text;
 }
 
 std::string SlotName(const SaveSlot& s, bool german) {
-  if (s.options) return german ? "Einstellungen des Spiels" : "The game's settings";
-  if (s.number) return (german ? "Spielstand " : "Save ") + std::to_string(s.number);
+  if (s.options) return german ? "Einstellungen des Spiels" : NL("The game's settings");
+  if (s.number) return (german ? "Spielstand " : NL("Save ")) + std::to_string(s.number);
   return s.name;
 }
 
 // Where an older version comes from, in words.
 std::string CopyKind(const SaveCopy& c, bool german) {
   if (c.previous) {
-    return german ? "Vom Spiel: der Stand vor dem letzten Speichern" : "From the game: the save before its last save";
+    return german ? "Vom Spiel: der Stand vor dem letzten Speichern" : NL("From the game: the save before its last save");
   }
   if (c.before_restore) {
     return german ? "Dein Stand, bevor eine \xC3\xA4ltere Version zur\xC3\xBC" "ckgeholt wurde"
-                  : "Your save before an older version was brought back";
+                  : NL("Your save before an older version was brought back");
   }
-  if (c.automatic) return german ? "Automatisch vom Hub gesichert" : "Kept by the launcher on its own";
-  return german ? "Von dir gesichert" : "Backed up by you";
+  if (c.automatic) return german ? "Automatisch vom Hub gesichert" : NL("Kept by the launcher on its own");
+  return german ? "Von dir gesichert" : NL("Backed up by you");
 }
 
 // When a copy was made: its folder's last write, as a Windows file time (0 if unknown).
-uint64_t FolderTime(const std::filesystem::path& folder) {
-  WIN32_FILE_ATTRIBUTE_DATA data{};
-  if (!GetFileAttributesExW(folder.c_str(), GetFileExInfoStandard, &data)) return 0;
-  return uint64_t(data.ftLastWriteTime.dwHighDateTime) << 32 | data.ftLastWriteTime.dwLowDateTime;
-}
+uint64_t FolderTime(const std::filesystem::path& folder) { return platform::FileWriteTime(folder); }
 
 std::string VersionCount(size_t n, bool german) {
   if (german) return n == 1 ? "1 \xC3\xA4ltere Version" : std::to_string(n) + " \xC3\xA4ltere Versionen";
@@ -163,14 +162,14 @@ void SavesScreen::Draw(float width, float height) {
   const float u = UiScale(width, height);
   DrawBackdrop(dl, width, height, background_);
   const Game& game = AllGames()[game_];
-  Text(dl, bold_, 22 * u, {48 * u, 30 * u}, kDim, german_ ? "SPIELST\xC3\x84NDE" : "SAVES");
+  Text(dl, bold_, 22 * u, {48 * u, 30 * u}, kDim, german_ ? "SPIELST\xC3\x84NDE" : NL("SAVES"));
   Text(dl, bold_, 44 * u, {46 * u, 52 * u}, kGold, german_ ? game.name_de : game.name_en);
-  const std::string profile = (german_ ? "Profil: " : "Profile: ") + ActiveProfile().name;
+  const std::string profile = (german_ ? "Profil: " : NL("Profile: ")) + ActiveProfile().name;
   Text(dl, regular_, 20 * u, {width - 48 * u - TextWidth(regular_, 20 * u, profile), 64 * u}, kDim, profile);
   // What the screen is for, in one line.
   Text(dl, regular_, 19 * u, {48 * u, 106 * u}, kDim,
        german_ ? "Hier sicherst du deine Spielst\xC3\xA4nde und holst bei Bedarf eine \xC3\xA4ltere Version zur\xC3\xBC" "ck."
-               : "Back up your saves here, or bring back an older version when you need it.",
+               : NL("Back up your saves here, or bring back an older version when you need it."),
        width - 96 * u);
 
   const float left = 48 * u, top = 150 * u, bottom = height - 80 * u;
@@ -212,7 +211,7 @@ void SavesScreen::Draw(float width, float height) {
       std::error_code ec;
       const std::filesystem::path dir = BackupsDir(ActiveProfile(), game);
       std::filesystem::create_directories(dir, ec);
-      ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+      platform::OpenPath(dir);
     }
     // B: from the versions back to the saves, from the saves out.
     if (back) {
@@ -225,13 +224,13 @@ void SavesScreen::Draw(float width, float height) {
   }
 
   // The saves: the games first, the game's own settings file apart at the end.
-  Text(dl, bold_, 24 * u, {left, top}, column_ == 0 ? kGold : kDim, german_ ? "Deine Spielst\xC3\xA4nde" : "Your saves");
+  Text(dl, bold_, 24 * u, {left, top}, column_ == 0 ? kGold : kDim, german_ ? "Deine Spielst\xC3\xA4nde" : NL("Your saves"));
   const float list_top = top + 42 * u;
   const float row_h = 76 * u;
   if (slots_.empty()) {
     Text(dl, regular_, 21 * u, {left, list_top}, kDim,
          german_ ? "Noch kein Spielstand: Das Spiel legt ihn beim ersten Speichern an."
-                 : "No save yet: the game makes one when it first saves.",
+                 : NL("No save yet: the game makes one when it first saves."),
          col_w);
   }
   float y = list_top;
@@ -252,7 +251,7 @@ void SavesScreen::Draw(float width, float height) {
     dl->AddRectFilled(a, b, chosen ? kChosen : kPanel, 16 * u);
     if (chosen) dl->AddRect(a, b, column_ == 0 ? kGold : Rgba(255, 255, 255, 120), 16 * u, 0, (column_ == 0 ? 3 : 1.5f) * u);
     Text(dl, bold_, (s.options ? 21 : 24) * u, {a.x + 18 * u, y + 10 * u}, s.options ? kDim : kWhite, SlotName(s, german_));
-    const std::string saved = (german_ ? "Zuletzt gespeichert: " : "Last saved: ") + When(s.written, german_);
+    const std::string saved = (german_ ? "Zuletzt gespeichert: " : NL("Last saved: ")) + When(s.written, german_);
     Text(dl, regular_, 18 * u, {a.x + 18 * u, y + 44 * u}, kDim, saved);
     // How many older versions there are, at the right.
     const size_t count = size_t(i) < copy_counts_.size() ? copy_counts_[size_t(i)] : 0;
@@ -270,17 +269,17 @@ void SavesScreen::Draw(float width, float height) {
   const float rx = left + col_w + 24 * u;
   if (!slots_.empty()) {
     const std::string title = german_ ? "\xC3\x84ltere Versionen von " + SlotName(slots_[size_t(slot_)], true)
-                                      : "Older versions of " + SlotName(slots_[size_t(slot_)], false);
+                                      : NL("Older versions of ") + SlotName(slots_[size_t(slot_)], false);
     Text(dl, bold_, 24 * u, {rx, top}, column_ == 1 ? kGold : kDim, title);
     const ImVec2 ba{rx, list_top}, bb{rx + col_w, list_top + 58 * u};
     const bool hover = !asking && Inside(io, ba, bb);
     dl->AddRectFilled(ba, bb, hover ? Rgba(50, 120, 220, 120) : Rgba(50, 120, 220, 70), 14 * u);
     dl->AddRect(ba, bb, Rgba(90, 160, 255, 200), 14 * u, 0, 1.5f * u);
     float bx = Hint(dl, bold_, 21 * u, {ba.x + 16 * u, ba.y + 8 * u}, "X", Rgba(50, 120, 220),
-                    german_ ? "Jetzt sichern" : "Back up now");
+                    german_ ? "Jetzt sichern" : NL("Back up now"));
     (void)bx;
     Text(dl, regular_, 16 * u, {ba.x + 16 * u, ba.y + 34 * u}, kDim,
-         german_ ? "Legt eine Kopie des jetzigen Stands an." : "Keeps a copy of the save as it is now.");
+         german_ ? "Legt eine Kopie des jetzigen Stands an." : NL("Keeps a copy of the save as it is now."));
     if (hover && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) backup_now = true;
   }
   const float versions_top = list_top + 72 * u;
@@ -288,7 +287,7 @@ void SavesScreen::Draw(float width, float height) {
     Text(dl, regular_, 20 * u, {rx, versions_top}, kDim,
          german_ ? "Noch keine \xC3\xA4lteren Versionen. Das Spiel legt beim n\xC3\xA4" "chsten Speichern eine an, "
                    "oder du sicherst jetzt mit X."
-                 : "No older versions yet. The game keeps one at its next save, or back it up now with X.",
+                 : NL("No older versions yet. The game keeps one at its next save, or back it up now with X."),
          col_w);
   }
   const float vrow_h = 66 * u;
@@ -305,7 +304,7 @@ void SavesScreen::Draw(float width, float height) {
     dl->AddRectFilled(a, b, chosen ? kChosen : kPanel, 14 * u);
     if (chosen) dl->AddRect(a, b, kGold, 14 * u, 0, 3 * u);
     const SaveCopy& c = copies_[size_t(i)];
-    Text(dl, bold_, 22 * u, {a.x + 18 * u, vy + 8 * u}, kWhite, (german_ ? "Stand von " : "As of ") + When(c.written, german_));
+    Text(dl, bold_, 22 * u, {a.x + 18 * u, vy + 8 * u}, kWhite, (german_ ? "Stand von " : NL("As of ")) + When(c.written, german_));
     // Where it comes from, and when it was kept (two copies of one save state differ only there).
     std::string kind = CopyKind(c, german_);
     if (const uint64_t made = FolderTime(c.folder)) kind += " \xC2\xB7 " + When(made, german_);
@@ -317,8 +316,8 @@ void SavesScreen::Draw(float width, float height) {
     const std::string name = SlotName(slots_[size_t(slot_)], german_);
     const bool ok = BackupSave(ActiveProfile(), game, slots_[size_t(slot_)]);
     Load();
-    Message(ok ? name + (german_ ? " gesichert" : " backed up")
-               : (german_ ? "Konnte nicht sichern: " : "Could not back it up: ") + LastSaveError());
+    Message(ok ? name + (german_ ? " gesichert" : NL(" backed up"))
+               : (german_ ? "Konnte nicht sichern: " : NL("Could not back it up: ")) + LastSaveError());
   }
 
   // Hints for what is chosen, the message, or the question.
@@ -327,15 +326,15 @@ void SavesScreen::Draw(float width, float height) {
   if (!asking) {
     if (column_ == 0) {
       if (!copies_.empty()) {
-        hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x84ltere Versionen" : "Older versions");
+        hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x84ltere Versionen" : NL("Older versions"));
       }
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Jetzt sichern" : "Back up now");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Ordner \xC3\xB6" "ffnen" : "Open the folder");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Jetzt sichern" : NL("Back up now"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Ordner \xC3\xB6" "ffnen" : NL("Open the folder"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
     } else {
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Diese Version zur\xC3\xBC" "ckholen" : "Bring this one back");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Jetzt sichern" : "Back up now");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zu den Spielst\xC3\xA4nden" : "To the saves");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Diese Version zur\xC3\xBC" "ckholen" : NL("Bring this one back"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Jetzt sichern" : NL("Back up now"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zu den Spielst\xC3\xA4nden" : NL("To the saves"));
     }
   } else {
     const SaveSlot& s = slots_[size_t(slot_)];
@@ -346,24 +345,24 @@ void SavesScreen::Draw(float width, float height) {
     dl->AddRectFilled(a, b, Rgba(20, 26, 64, 250), 18 * u);
     dl->AddRect(a, b, kGold, 18 * u, 0, 3 * u);
     Text(dl, bold_, 28 * u, {a.x + 28 * u, a.y + 22 * u}, kGold,
-         german_ ? "\xC3\x84ltere Version zur\xC3\xBC" "ckholen?" : "Bring back the older version?");
+         german_ ? "\xC3\x84ltere Version zur\xC3\xBC" "ckholen?" : NL("Bring back the older version?"));
     const std::string what = german_ ? SlotName(s, true) + " wird durch den Stand von " + When(c.written, true) + " ersetzt."
-                                     : SlotName(s, false) + " is replaced with the save as of " + When(c.written, false) + ".";
+                                     : SlotName(s, false) + NL(" is replaced with the save as of ") + When(c.written, false) + ".";
     Text(dl, regular_, 21 * u, {a.x + 28 * u, a.y + 70 * u}, kWhite, what, pw - 56 * u);
     Text(dl, regular_, 19 * u, {a.x + 28 * u, a.y + 110 * u}, kDim,
          german_ ? "Dein jetziger Stand wird vorher gesichert, du kannst also jederzeit zur\xC3\xBC" "ck."
-                 : "Your save as it is now is kept first, so you can always go back.",
+                 : NL("Your save as it is now is kept first, so you can always go back."),
          pw - 56 * u);
     float bx = a.x + 28 * u;
-    bx = Hint(dl, bold_, 22 * u, {bx, b.y - 52 * u}, "A", Rgba(70, 170, 70), german_ ? "Zur\xC3\xBC" "ckholen" : "Bring it back");
-    bx = Hint(dl, bold_, 22 * u, {bx, b.y - 52 * u}, "B", Rgba(200, 60, 60), german_ ? "Abbrechen" : "Cancel");
+    bx = Hint(dl, bold_, 22 * u, {bx, b.y - 52 * u}, "A", Rgba(70, 170, 70), german_ ? "Zur\xC3\xBC" "ckholen" : NL("Bring it back"));
+    bx = Hint(dl, bold_, 22 * u, {bx, b.y - 52 * u}, "B", Rgba(200, 60, 60), german_ ? "Abbrechen" : NL("Cancel"));
     if (Pressed(ImGuiKey_GamepadFaceDown, ImGuiKey_Enter)) {
       const std::string name = SlotName(s, german_);  // before Load() makes the list anew
       const bool ok = RestoreSave(ActiveProfile(), game, s, c);
       confirm_ = false;
       Load();
-      Message(ok ? name + (german_ ? " zur\xC3\xBC" "ckgeholt" : " brought back")
-                 : (german_ ? "Konnte nicht zur\xC3\xBC" "ckholen: " : "Could not bring it back: ") + LastSaveError());
+      Message(ok ? name + (german_ ? " zur\xC3\xBC" "ckgeholt" : NL(" brought back"))
+                 : (german_ ? "Konnte nicht zur\xC3\xBC" "ckholen: " : NL("Could not bring it back: ")) + LastSaveError());
     } else if (back) {
       confirm_ = false;
     }

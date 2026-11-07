@@ -30,8 +30,10 @@ struct Release {
 // <asset_prefix>-<version><extension> (a setup's .exe, the portable launcher's .zip); nullopt
 // without network, release or such an asset. Blocks (a few hundred milliseconds): call it from a
 // background thread.
+// `answered` (when given) becomes true once GitHub answered with a list of releases, also when none
+// of them has such an asset (on Linux: no Linux build of that game released yet).
 std::optional<Release> FetchLatestRelease(const std::string& repo, const std::string& asset_prefix,
-                                          const std::string& extension = ".exe");
+                                          const std::string& extension = ".exe", bool* answered = nullptr);
 
 // The releases kept from the last check, and when it was (Windows file time; 0: never).
 std::vector<Release> LoadKnownReleases(uint64_t* checked = nullptr);
@@ -49,7 +51,7 @@ std::string FileSha256(const std::filesystem::path& file);
 bool DownloadFile(const std::string& url, const std::filesystem::path& file, std::atomic<float>* progress,
                   const std::atomic<bool>* cancel, const std::string& sha256 = {});
 
-// Where downloaded setups go: %TEMP%\CoreOfLight\downloads.
+// Where downloaded setups go: %TEMP%\CoreOfLight\downloads (on Linux ~/.cache/CoreOfLight/downloads).
 std::filesystem::path DownloadsDir();
 
 // --offline: no releases at all, neither the ones kept nor a check, so nothing gets downloaded or

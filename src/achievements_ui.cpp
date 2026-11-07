@@ -11,6 +11,7 @@
 #include "nxe_art.h"
 #include "profiles.h"
 #include "textures.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -125,9 +126,9 @@ void AchievementsScreen::Draw(float width, float height) {
   const float u = UiScale(width, height);
   DrawBackdrop(dl, width, height, GameBackground(game_));
   Text(dl, bold_, 22 * u, {48 * u, 34 * u}, kDim, "SKYLANDERS");
-  Text(dl, bold_, 56 * u, {46 * u, 56 * u}, kGold, german_ ? "ERFOLGE" : "ACHIEVEMENTS");
+  Text(dl, bold_, 56 * u, {46 * u, 56 * u}, kGold, german_ ? "ERFOLGE" : NL("ACHIEVEMENTS"));
   // Whose they are.
-  const std::string whose = (german_ ? "Profil " : "Profile ") + ActiveProfile().name;
+  const std::string whose = (german_ ? "Profil " : NL("Profile ")) + ActiveProfile().name;
   Text(dl, regular_, 20 * u, {width - 48 * u - TextWidth(regular_, 20 * u, whose), 48 * u}, kDim, whose);
 
   auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, true); };
@@ -174,13 +175,13 @@ void AchievementsScreen::Draw(float width, float height) {
     Text(dl, regular_, 22 * u, {left, top + 20 * u}, kDim,
          german_ ? "Noch keine Erfolgsliste: das Spiel legt seine Erfolge mit Bildern ab, wenn es einmal "
                    "etwa eine halbe Minute lief."
-                 : "No list yet: the game leaves its achievements with their pictures once it ran for about "
-                   "half a minute.",
+                 : NL("No list yet: the game leaves its achievements with their pictures once it ran for about "
+                   "half a minute."),
          width - 2 * left);
   } else {
     char summary[160];
     std::snprintf(summary, sizeof(summary),
-                  german_ ? "%d von %zu Erfolgen  \xC2\xB7  %u / %u G" : "%d of %zu achievements  \xC2\xB7  %u / %u G",
+                  german_ ? "%d von %zu Erfolgen  \xC2\xB7  %u / %u G" : NL("%d of %zu achievements  \xC2\xB7  %u / %u G"),
                   list_.unlocked, list_.items.size(), list_.gamerscore, list_.gamerscore_total);
     Text(dl, bold_, 24 * u, {left, top}, kWhite, summary);
     // How far, as a bar, and the platinum trophy in front of it: bright with its date once every
@@ -190,7 +191,7 @@ void AchievementsScreen::Draw(float width, float height) {
     DrawPlatinumTrophy(dl, bar_x - 30 * u, top + 14 * u, 40 * u, list_.platinum);
     if (list_.platinum) {
       const std::string date = FileTimeDate(list_.platinum_time, german_);
-      const std::string label = (german_ ? "PLATIN-TROPH\xC3\x84" "E" : "PLATINUM TROPHY") +
+      const std::string label = (german_ ? "PLATIN-TROPH\xC3\x84" "E" : NL("PLATINUM TROPHY")) +
                                 (date.empty() ? std::string() : "  \xC2\xB7  " + date);
       Text(dl, bold_, 24 * u, {bar_x, top}, Rgba(222, 232, 248), label);
     } else {
@@ -267,7 +268,7 @@ void AchievementsScreen::Draw(float width, float height) {
       if (got) {
         const std::string date = FileTimeDate(a.unlocked, german_);
         if (!date.empty()) {
-          const std::string when = (german_ ? "Freigeschaltet am " : "Unlocked on ") + date;
+          const std::string when = (german_ ? "Freigeschaltet am " : NL("Unlocked on ")) + date;
           Text(dl, regular_, 15 * u, {tx0, y + 58 * u}, kGreen, when);
         }
       }
@@ -280,9 +281,9 @@ void AchievementsScreen::Draw(float width, float height) {
   if (!info_ && list_.known && !list_.items.empty()) {
     hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 160, 70), "Info");
   }
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB", Rgba(80, 90, 140), german_ ? "Spiel davor" : "Previous game");
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "RB", Rgba(80, 90, 140), german_ ? "N\xC3\xA4" "chstes Spiel" : "Next game");
-  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB", Rgba(80, 90, 140), german_ ? "Spiel davor" : NL("Previous game"));
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "RB", Rgba(80, 90, 140), german_ ? "N\xC3\xA4" "chstes Spiel" : NL("Next game"));
+  hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
   ImGui::End();
 }
 
@@ -314,25 +315,25 @@ void AchievementsScreen::DrawInfo(float width, float height, float u) {
   dl->AddText(regular_, 21 * u, {tx, ty}, kDim, a.description.c_str(), nullptr, tx + tw);
   ty += regular_->CalcTextSizeA(21 * u, FLT_MAX, tw, a.description.c_str()).y + 14 * u;
   if (!a.locked_description.empty() && a.locked_description != a.description) {
-    const std::string locked = (german_ ? "Vor dem Freischalten: " : "Before it is unlocked: ") + a.locked_description;
+    const std::string locked = (german_ ? "Vor dem Freischalten: " : NL("Before it is unlocked: ")) + a.locked_description;
     dl->AddText(regular_, 18 * u, {tx, ty}, Rgba(140, 150, 180), locked.c_str(), nullptr, tx + tw);
     ty += regular_->CalcTextSizeA(18 * u, FLT_MAX, tw, locked.c_str()).y + 14 * u;
   }
   std::string when;
   if (got) {
     const std::string date = FileTimeDate(a.unlocked, german_), clock = FileTimeClock(a.unlocked);
-    when = date.empty() ? (german_ ? "Freigeschaltet" : "Unlocked")
-                        : (german_ ? "Freigeschaltet am " : "Unlocked on ") + date +
-                              (clock.empty() ? std::string() : (german_ ? " um " : " at ") + clock);
+    when = date.empty() ? (german_ ? "Freigeschaltet" : NL("Unlocked"))
+                        : (german_ ? "Freigeschaltet am " : NL("Unlocked on ")) + date +
+                              (clock.empty() ? std::string() : (german_ ? " um " : NL(" at ")) + clock);
   } else {
-    when = german_ ? "Noch nicht freigeschaltet" : "Not unlocked yet";
+    when = german_ ? "Noch nicht freigeschaltet" : NL("Not unlocked yet");
   }
   Text(dl, bold_, 21 * u, {tx, std::max(ty, p0.y + 230 * u)}, got ? kGreen : kDim, when);
   char count[96];
-  std::snprintf(count, sizeof(count), german_ ? "%d von %zu Erfolgen dieses Spiels" : "%d of %zu of this game's achievements",
+  std::snprintf(count, sizeof(count), german_ ? "%d von %zu Erfolgen dieses Spiels" : NL("%d of %zu of this game's achievements"),
                 list_.unlocked, list_.items.size());
   Text(dl, regular_, 18 * u, {p0.x + 40 * u, p1.y - 44 * u}, kDim, count);
-  Hint(dl, bold_, 22 * u, {p1.x - 170 * u, p1.y - 48 * u}, "B", Rgba(200, 60, 60), german_ ? "Schlie\xC3\x9F" "en" : "Close");
+  Hint(dl, bold_, 22 * u, {p1.x - 170 * u, p1.y - 48 * u}, "B", Rgba(200, 60, 60), german_ ? "Schlie\xC3\x9F" "en" : NL("Close"));
 }
 
 }  // namespace coreoflight

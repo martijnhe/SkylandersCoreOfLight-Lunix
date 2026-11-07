@@ -1,7 +1,9 @@
 #include "disc_search.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
+#endif
 
 #include <algorithm>
 #include <cwctype>
@@ -16,19 +18,12 @@
 #include "games.h"
 #include "language_import.h"
 #include "xiso.h"
+#include "platform.h"
 
 namespace coreoflight {
 namespace {
 
 namespace fs = std::filesystem;
-
-fs::path Known(REFKNOWNFOLDERID id) {
-  PWSTR path = nullptr;
-  fs::path out;
-  if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &path))) out = path;
-  CoTaskMemFree(path);
-  return out;
-}
 
 std::wstring Lower(std::wstring s) {
   std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
@@ -57,11 +52,15 @@ void FindIsos(const fs::path& dir, int depth, const std::atomic<bool>& stop, std
     std::error_code type_ec;
     if (it->is_directory(type_ec)) {
       if (depth <= 0) continue;
+#ifdef _WIN32
       const DWORD attributes = GetFileAttributesW(p.c_str());
       if (attributes == INVALID_FILE_ATTRIBUTES ||
           (attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM | FILE_ATTRIBUTE_REPARSE_POINT))) {
         continue;
       }
+#else
+      if (it->is_symlink(type_ec)) continue;  // as a reparse point on Windows: no loops, no detours
+#endif
       if (std::find(std::begin(kSkipFolders), std::end(kSkipFolders), name) != std::end(kSkipFolders)) continue;
       FindIsos(p, depth - 1, stop, folders, on_iso);
     } else if (p.extension().wstring().size() == 4 && Lower(p.extension().wstring()) == L".iso" &&
@@ -75,9 +74,11 @@ void FindIsos(const fs::path& dir, int depth, const std::atomic<bool>& stop, std
 
 std::shared_ptr<DiscSearch> StartDiscSearch() {
   std::vector<std::pair<fs::path, int>> roots;
-  for (REFKNOWNFOLDERID id : {FOLDERID_Downloads, FOLDERID_Desktop, FOLDERID_Documents}) {
-    if (const fs::path p = Known(id); !p.empty()) roots.emplace_back(p, kPlaceDepth);
+  for (platform::UserFolder id :
+       {platform::UserFolder::kDownloads, platform::UserFolder::kDesktop, platform::UserFolder::kDocuments}) {
+    if (const fs::path p = platform::GetUserFolder(id); !p.empty()) roots.emplace_back(p, kPlaceDepth);
   }
+#ifdef _WIN32
   const DWORD drives = GetLogicalDrives();
   for (int d = 0; d < 26; ++d) {
     if (!(drives & (1u << d))) continue;
@@ -85,6 +86,16 @@ std::shared_ptr<DiscSearch> StartDiscSearch() {
     const UINT type = GetDriveTypeW(root.c_str());
     if (type == DRIVE_FIXED || type == DRIVE_REMOVABLE) roots.emplace_back(fs::path(root), kDriveDepth);
   }
+#else
+  // The home folder (the usual folders are above), and the mounted drives: a Steam Deck's microSD
+  // card, USB disks. Not / itself: the system's folders hold no discs.
+  if (const fs::path home = platform::GetUserFolder(platform::UserFolder::kHome); !home.empty()) {
+    roots.emplace_back(home, kDriveDepth);
+  }
+  for (const platform::Drive& drive : platform::Drives()) {
+    if (drive.root != "/") roots.emplace_back(drive.root, kDriveDepth);
+  }
+#endif
   return StartDiscSearch(std::move(roots));
 }
 

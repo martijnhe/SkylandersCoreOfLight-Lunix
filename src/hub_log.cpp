@@ -1,6 +1,12 @@
 #include "hub_log.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <sys/time.h>
+#include <unistd.h>
+#include <time.h>
+#endif
 
 #include <cctype>
 #include <cstdio>
@@ -10,13 +16,15 @@
 #include <string>
 #include <string_view>
 
+#include "platform.h"
+
 namespace coreoflight {
 
 namespace fs = std::filesystem;
 
 fs::path HubLogFile() {
-  const wchar_t* local = _wgetenv(L"LOCALAPPDATA");
-  return local ? fs::path(local) / "CoreOfLight" / "coreoflight.log" : fs::path();
+  const fs::path local = platform::LocalDataDir();
+  return local.empty() ? fs::path() : local / "coreoflight.log";
 }
 
 namespace {
@@ -25,14 +33,7 @@ namespace {
 // SDK does it (rexglue-sdk core/logging.cpp RedactUserData): the user folder becomes %USERPROFILE%,
 // any other user's folder after \Users\ <user>, the user's and the machine's names <user> and
 // <computer>.
-std::string EnvUtf8(const wchar_t* name) {
-  const wchar_t* value = _wgetenv(name);
-  if (!value || !*value) return {};
-  const int n = WideCharToMultiByte(CP_UTF8, 0, value, -1, nullptr, 0, nullptr, nullptr);
-  std::string out(n > 0 ? n - 1 : 0, '\0');
-  if (n > 1) WideCharToMultiByte(CP_UTF8, 0, value, -1, out.data(), n, nullptr, nullptr);
-  return out;
-}
+std::string EnvUtf8(const char* name) { return platform::Env(name); }
 
 char FoldChar(char c) { return c == '/' ? '\\' : static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
 
@@ -59,12 +60,31 @@ void ReplaceAll(std::string& text, std::string_view what, std::string_view with,
   }
 }
 
+#ifdef _WIN32
+std::string Hostname() { return EnvUtf8("COMPUTERNAME"); }
+#else
+std::string Hostname() {
+  char name[256] = "";
+  return gethostname(name, sizeof(name)) == 0 ? std::string(name) : std::string();
+}
+#endif
+
+// On Linux the home folder becomes ~ and any other user's after /home/ <user>; FoldChar makes / and
+// \ the same, so the Windows marker below finds /home/ too once it is "\\home\\".
 std::string RedactUserData(std::string text) {
-  static const std::string profile = EnvUtf8(L"USERPROFILE");
-  static const std::string user = EnvUtf8(L"USERNAME");
-  static const std::string computer = EnvUtf8(L"COMPUTERNAME");
-  if (profile.size() >= 4) ReplaceAll(text, profile, "%USERPROFILE%", false);
+#ifdef _WIN32
+  static const std::string profile = EnvUtf8("USERPROFILE");
+  static const std::string user = EnvUtf8("USERNAME");
+  constexpr std::string_view home_name = "%USERPROFILE%";
   constexpr std::string_view marker = "\\users\\";
+#else
+  static const std::string profile = EnvUtf8("HOME");
+  static const std::string user = EnvUtf8("USER");
+  constexpr std::string_view home_name = "~";
+  constexpr std::string_view marker = "\\home\\";
+#endif
+  static const std::string computer = Hostname();
+  if (profile.size() >= 4) ReplaceAll(text, profile, home_name, false);
   for (size_t at = 0; at + marker.size() <= text.size(); ++at) {
     if (!MatchesAt(text, at, marker)) continue;
     const size_t begin = at + marker.size();
@@ -93,17 +113,26 @@ void Write(const char* level, const std::string& line) {
   // Full: kept as coreoflight.old.log (it was emptied before, and with it what led up to a problem).
   if (fs::file_size(file, ec) > 256 * 1024 && !ec) {
     fs::path old = file;
-    old.replace_filename(L"coreoflight.old.log");
+    old.replace_filename("coreoflight.old.log");
     fs::rename(file, old, ec);
     if (ec) fs::remove(file, ec);
   }
   std::ofstream out(file, std::ios::app);
   if (!out) return;
+  char stamp[48];
+#ifdef _WIN32
   SYSTEMTIME t;
   GetLocalTime(&t);
-  char stamp[48];
   std::snprintf(stamp, sizeof(stamp), "%04u-%02u-%02u %02u:%02u:%02u.%03u [%s] ", t.wYear, t.wMonth, t.wDay, t.wHour,
                 t.wMinute, t.wSecond, t.wMilliseconds, level);
+#else
+  timeval now{};
+  gettimeofday(&now, nullptr);
+  tm t{};
+  localtime_r(&now.tv_sec, &t);
+  std::snprintf(stamp, sizeof(stamp), "%04d-%02d-%02d %02d:%02d:%02d.%03d [%s] ", t.tm_year + 1900, t.tm_mon + 1,
+                t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec, int(now.tv_usec / 1000), level);
+#endif
   out << stamp << RedactUserData(line) << "\n";
 }
 
@@ -113,6 +142,7 @@ void HubLog(const std::string& line) { Write("info", line); }
 void HubWarn(const std::string& line) { Write("warn", line); }
 void HubError(const std::string& line) { Write("error", line); }
 
+#ifdef _WIN32
 std::string WindowsVersion() {
   using RtlGetVersionFn = LONG(WINAPI*)(OSVERSIONINFOW*);
   OSVERSIONINFOW v{};
@@ -131,5 +161,10 @@ std::string WineVersion() {
   const auto get = ntdll ? reinterpret_cast<GetVersion>(GetProcAddress(ntdll, "wine_get_version")) : nullptr;
   return get ? std::string(get()) : std::string();
 }
+
+#else
+std::string WindowsVersion() { return {}; }
+std::string WineVersion() { return {}; }
+#endif
 
 }  // namespace coreoflight

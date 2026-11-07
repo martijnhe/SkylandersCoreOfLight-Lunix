@@ -1,6 +1,8 @@
 #include "hub_settings.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -8,6 +10,8 @@
 
 #include "games.h"
 #include "portal/data_folder.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -53,7 +57,8 @@ HubSettings LoadHubSettings() {
     auto it = values.find(key);
     return it == values.end() ? std::string() : Unquoted(it->second);
   };
-  if (const std::string language = get("language"); language == "german" || language == "english") {
+  if (const std::string language = get("language"); language == "german" || language == "english" ||
+                                                          language == "dutch") {
     s.language = language;
   }
   s.figures_only_mine = IsOn(get("figures_only_mine"), s.figures_only_mine);
@@ -66,6 +71,7 @@ HubSettings LoadHubSettings() {
   s.animations = IsOn(get("animations"), s.animations);
   s.fullscreen = IsOn(get("fullscreen"), s.fullscreen);
   s.auto_backup = IsOn(get("auto_backup"), s.auto_backup);
+  s.unlock_all_figures = IsOn(get("unlock_all_figures"), s.unlock_all_figures);
   s.auto_update_games = IsOn(get("auto_update_games"), s.auto_update_games);
   if (const std::string handheld = get("handheld"); handheld == "on" || handheld == "off") s.handheld = handheld;
   s.setup_done = IsOn(get("setup_done"), s.setup_done);
@@ -80,16 +86,39 @@ HubSettings LoadHubSettings() {
   return s;
 }
 
+bool HubDutch(const HubSettings& s) {
+  if (s.language == "dutch") return true;
+  if (s.language != "auto" && !s.language.empty()) return false;
+#ifdef _WIN32
+  return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_DUTCH;
+#else
+  for (const char* name : {"LC_ALL", "LC_MESSAGES", "LANG"}) {
+    const std::string value = platform::Env(name);
+    if (!value.empty()) return value.rfind("nl", 0) == 0;
+  }
+  return false;
+#endif
+}
+
 bool HubGerman(const HubSettings& s) {
   if (s.language == "german") return true;
-  if (s.language == "english") return false;
+  if (s.language == "english" || s.language == "dutch") return false;
+#ifdef _WIN32
   return PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_GERMAN;
+#else
+  // The language the desktop uses for messages (LC_ALL, LC_MESSAGES, LANG: "de_DE.UTF-8").
+  for (const char* name : {"LC_ALL", "LC_MESSAGES", "LANG"}) {
+    const std::string value = platform::Env(name);
+    if (!value.empty()) return value.rfind("de", 0) == 0;
+  }
+  return false;
+#endif
 }
 
 void GamesFolderLabels(std::string& en, std::string& de) {
   const std::u8string u8 = GamesFolder().u8string();
   const std::string path(u8.begin(), u8.end());
-  en = GamesFolderChosen() ? path : "Default: " + path;
+  en = GamesFolderChosen() ? path : NL("Default: ") + path;
   de = GamesFolderChosen() ? path : "Standard: " + path;
 }
 
@@ -98,7 +127,7 @@ void DataFolderLabels(std::string& en, std::string& de) {
   const std::string path(u8.begin(), u8.end());
   std::error_code ec;
   const bool standard = !DocumentsMoved() && SkylandersDir() == DocumentsDir() / "Skylanders";
-  en = standard ? "Default: " + path : path;
+  en = standard ? NL("Default: ") + path : path;
   de = standard ? "Standard: " + path : path;
 }
 
@@ -111,7 +140,7 @@ void PortableDataLabels(std::string& en, std::string& de) {
   }
   const std::u8string u8 = portable.u8string();
   const std::string path(u8.begin(), u8.end());
-  en = "On: " + path;
+  en = NL("On: ") + path;
   de = "An: " + path;
 }
 
@@ -131,7 +160,7 @@ std::shared_ptr<GameSettings> HubSettingsPages(const HubSettings& settings) {
   language.category = kCategory;
   language.value = settings.language;
   language.options = {{"auto", "Automatic", "Automatisch"}, {"german", "Deutsch", "Deutsch"},
-                      {"english", "English", "English"}};
+                      {"english", "English", "English"}, {"dutch", "Nederlands", "Nederlands"}};
   page.settings.push_back(language);
   page.settings.push_back(Switch(
       "figures_only_mine", "Figures: only mine", "Figuren: nur meine",
@@ -214,6 +243,18 @@ std::shared_ptr<GameSettings> HubSettingsPages(const HubSettings& settings) {
                                  "oder einen Handheld. F11 oder Alt+Enter schalten auch um; --fullscreen in seiner "
                                  "Befehlszeile (Steams Startoptionen) startet ihn immer im Vollbild.",
                                  settings.fullscreen));
+  page.settings.push_back(Switch(
+      "unlock_all_figures", "Unlock all figures", "Alle Figuren freischalten",
+      "Every Skylander, variant, trap, magic item, sidekick and vehicle of the first five games as a new, "
+      "blank figure in your figure folder (the active profile's), the way the portal menu makes one: every "
+      "game and the figure library have them all. Imaginators' toys are signed and only work as files of "
+      "the real toys. Off removes the blank ones again; a figure you have played with stays.",
+      "Jeder Skylander, jede Variante, Falle, jeder magische Gegenstand, Sidekick und jedes Fahrzeug der "
+      "ersten f\xC3\xBC" "nf Spiele als neue, leere Figur in deinem Figuren-Ordner (dem des aktiven "
+      "Profils), wie das Portal-Men\xC3\xBC eine macht: jedes Spiel und die Figurenbibliothek haben dann "
+      "alle. Die Spielzeuge von Imaginators sind signiert und gehen nur als Dateien der echten. Aus "
+      "entfernt die leeren wieder; eine Figur, mit der du gespielt hast, bleibt.",
+      settings.unlock_all_figures));
   page.settings.push_back(Switch(
       "auto_backup", "Back up saves", "Spielst\xC3\xA4nde sichern",
       "When a game starts and ends and every 60 minutes while it runs, a copy of each of its saves that "

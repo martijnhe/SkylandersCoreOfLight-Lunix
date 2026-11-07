@@ -17,6 +17,7 @@
 #include "imgui_internal.h"  // ImTextCharToUtf8
 #include "portal/figure_file.h"
 #include "textures.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -181,7 +182,7 @@ void ProfilesScreen::StartPictureChoice() {
   if (pictures_.empty()) {
     Message(german_ ? "Noch keine Bilder: jedes Spiel legt die Bilder seiner Figuren ab, wenn es einmal "
                       "ein paar Minuten lief."
-                    : "No pictures yet: each game leaves its figures' pictures once it ran for a few minutes.");
+                    : NL("No pictures yet: each game leaves its figures' pictures once it ran for a few minutes."));
     return;
   }
   picture_ = 0;
@@ -208,10 +209,10 @@ void ProfilesScreen::DrawCard(size_t index, float x, float y, float w, float h, 
     dl->AddCircle(c, 60 * s, kDim, 48, 4 * s);
     dl->AddLine({c.x - 30 * s, c.y}, {c.x + 30 * s, c.y}, kDim, 6 * s);
     dl->AddLine({c.x, c.y - 30 * s}, {c.x, c.y + 30 * s}, kDim, 6 * s);
-    Centered(dl, bold_, 28 * s, x, w, y + 240 * s, kWhite, german_ ? "Neues Profil" : "New profile");
+    Centered(dl, bold_, 28 * s, x, w, y + 240 * s, kWhite, german_ ? "Neues Profil" : NL("New profile"));
     Text(dl, regular_, 19 * s, {x + 20 * s, y + 290 * s}, kDim,
          german_ ? "Eigene Spielst\xC3\xA4nde und Figuren, deine bisherigen bleiben, wie sie sind."
-                 : "Its own saves and figures; your current ones stay as they are.",
+                 : NL("Its own saves and figures; your current ones stay as they are."),
          w - 40 * s);
     return;
   }
@@ -221,10 +222,10 @@ void ProfilesScreen::DrawCard(size_t index, float x, float y, float w, float h, 
   Centered(dl, bold_, 30 * s, x, w, y + 206 * s, kWhite, Fit(bold_, 30 * s, p.name, w - 30 * s));
   if (IsMainProfile(p)) {
     Centered(dl, regular_, 17 * s, x, w, y + 244 * s, kDim,
-             german_ ? "Deine Daten wie die Spiele sie kennen" : "Your data as the games keep it");
+             german_ ? "Deine Daten wie die Spiele sie kennen" : NL("Your data as the games keep it"));
   }
   char figures[96];
-  std::snprintf(figures, sizeof(figures), german_ ? "%d Figuren  \xC2\xB7  %u G" : "%d figures  \xC2\xB7  %u G",
+  std::snprintf(figures, sizeof(figures), german_ ? "%d Figuren  \xC2\xB7  %u G" : NL("%d figures  \xC2\xB7  %u G"),
                 figure_counts_[index], gamerscores_[index]);
   Text(dl, regular_, 20 * s, {x + 22 * s, y + 280 * s}, kDim, figures);
   // Its platinum trophies, as cups behind the gamerscore.
@@ -233,11 +234,11 @@ void ProfilesScreen::DrawCard(size_t index, float x, float y, float w, float h, 
                        20 * s, true);
   }
   const std::string saves =
-      saves_[index].empty() ? (german_ ? "Noch keine Spielst\xC3\xA4nde" : "No saves yet")
-                            : (german_ ? "Spielst\xC3\xA4nde: " : "Saves: ") + saves_[index];
+      saves_[index].empty() ? (german_ ? "Noch keine Spielst\xC3\xA4nde" : NL("No saves yet"))
+                            : (german_ ? "Spielst\xC3\xA4nde: " : NL("Saves: ")) + saves_[index];
   Text(dl, regular_, 18 * s, {x + 22 * s, y + 308 * s}, kDim, saves, w - 44 * s);
   if (active) {
-    const std::string tag = german_ ? "Aktiv" : "Active";
+    const std::string tag = german_ ? "Aktiv" : NL("Active");
     const float tw = TextWidth(bold_, 20 * s, tag) + 28 * s;
     const ImVec2 a{x + (w - tw) * 0.5f, y + h - 54 * s};
     dl->AddRectFilled(a, {a.x + tw, a.y + 34 * s}, kGold, 17 * s);
@@ -258,7 +259,7 @@ void ProfilesScreen::Draw(float width, float height) {
   dl->AddRectFilledMultiColor({0, 0}, {width, height}, Rgba(10, 22, 60), Rgba(10, 22, 60), Rgba(3, 7, 22),
                               Rgba(3, 7, 22));
   Text(dl, bold_, 22 * u, {48 * u, 34 * u}, kDim, "SKYLANDERS");
-  Text(dl, bold_, 56 * u, {46 * u, 56 * u}, kGold, german_ ? "PROFILE" : "PROFILES");
+  Text(dl, bold_, 56 * u, {46 * u, 56 * u}, kGold, german_ ? "PROFILE" : NL("PROFILES"));
 
   auto pressed = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, true); };
   auto once = [](ImGuiKey k) { return ImGui::IsKeyPressed(k, false); };
@@ -317,13 +318,13 @@ void ProfilesScreen::Draw(float width, float height) {
     };
     std::vector<Action> actions;
     if (on_profile) {
-      actions.push_back({"Y", german_ ? "Bild" : "Picture", Rgba(220, 180, 40), &act_picture});
-      actions.push_back({"X", german_ ? "Name" : "Name", Rgba(50, 120, 220), &act_name});
+      actions.push_back({"Y", german_ ? "Bild" : NL("Picture"), Rgba(220, 180, 40), &act_picture});
+      actions.push_back({"X", german_ ? "Name" : NL("Name"), Rgba(50, 120, 220), &act_name});
       if (selected_ > 0) {
-        actions.push_back({"Back", german_ ? "L\xC3\xB6schen" : "Delete", Rgba(200, 60, 60), &act_delete});
+        actions.push_back({"Back", german_ ? "L\xC3\xB6schen" : NL("Delete"), Rgba(200, 60, 60), &act_delete});
       }
     } else {
-      actions.push_back({"A", german_ ? "Erstellen" : "Create", Rgba(70, 170, 70), &act_create});
+      actions.push_back({"A", german_ ? "Erstellen" : NL("Create"), Rgba(70, 170, 70), &act_create});
     }
     const float bh = 40 * u, bgap = 8 * u;
     const float bw = (card_w - bgap * float(actions.size() - 1)) / float(actions.size());
@@ -348,11 +349,11 @@ void ProfilesScreen::Draw(float width, float height) {
       if (confirm || clicked || act_create) {
         if (!on_profile) {
           char name[32];
-          std::snprintf(name, sizeof(name), german_ ? "Profil %zu" : "Profile %zu", profiles_.size() + 1);
+          std::snprintf(name, sizeof(name), german_ ? "Profil %zu" : NL("Profile %zu"), profiles_.size() + 1);
           const std::string id = CreateProfile(name);
           if (id.empty()) {
             Message(german_ ? "Das Profil lie\xC3\x9F sich nicht anlegen (Dokumente\\Skylanders\\Profiles)."
-                            : "Could not make the profile (Documents\\Skylanders\\Profiles).");
+                            : NL("Could not make the profile (Documents\\Skylanders\\Profiles)."));
           } else {
             Load();
             for (size_t i = 0; i < profiles_.size(); ++i) {
@@ -379,16 +380,16 @@ void ProfilesScreen::Draw(float width, float height) {
         open_ = false;
       }
       hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70),
-                on_profile ? (german_ ? "Mit diesem Profil spielen" : "Play with this profile")
-                           : (german_ ? "Anlegen" : "Make it"));
+                on_profile ? (german_ ? "Mit diesem Profil spielen" : NL("Play with this profile"))
+                           : (german_ ? "Anlegen" : NL("Make it")));
       if (on_profile) {
-        hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Bild" : "Picture", "Tab");
-        hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Name" : "Name", "F2");
+        hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Bild" : NL("Picture"), "Tab");
+        hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Name" : NL("Name"), "F2");
         if (selected_ > 0) {
-          hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Back", Rgba(80, 90, 140), german_ ? "L\xC3\xB6schen" : "Delete", "Del");
+          hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Back", Rgba(80, 90, 140), german_ ? "L\xC3\xB6schen" : NL("Delete"), "Del");
         }
       }
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
       break;
     }
     case Mode::kNewFigures: {
@@ -397,22 +398,22 @@ void ProfilesScreen::Draw(float width, float height) {
       float y = panel.y + 22 * u;
       const float x = panel.x + 28 * u, w = panel_w - 56 * u;
       Text(dl, bold_, 28 * u, {x, y}, kGold,
-           Fit(bold_, 28 * u, (german_ ? "Figuren f\xC3\xBCr " : "Figures for ") + profiles_[selected_].name, w));
+           Fit(bold_, 28 * u, (german_ ? "Figuren f\xC3\xBCr " : NL("Figures for ")) + profiles_[selected_].name, w));
       y += 46 * u;
-      const std::string source = (german_ ? "Aus dem Profil " : "From the profile ") + from.name + ":";
+      const std::string source = (german_ ? "Aus dem Profil " : NL("From the profile ")) + from.name + ":";
       Text(dl, regular_, 20 * u, {x, y}, kDim, source, w);
       y += 40 * u;
       float lx = x;
       lx = Hint(dl, bold_, 22 * u, {lx, y}, "A", Rgba(70, 170, 70),
-                german_ ? "Neu anfangen (wie frisch gekauft)" : "Start over (as if just bought)");
+                german_ ? "Neu anfangen (wie frisch gekauft)" : NL("Start over (as if just bought)"));
       y += 40 * u;
       lx = Hint(dl, bold_, 22 * u, {x, y}, "X", Rgba(50, 120, 220),
-                german_ ? "Kopien, wie sie sind" : "Copies as they are");
+                german_ ? "Kopien, wie sie sind" : NL("Copies as they are"));
       y += 40 * u;
-      lx = Hint(dl, bold_, 22 * u, {x, y}, "Y", Rgba(220, 180, 40), german_ ? "Ohne Figuren" : "No figures");
+      lx = Hint(dl, bold_, 22 * u, {x, y}, "Y", Rgba(220, 180, 40), german_ ? "Ohne Figuren" : NL("No figures"));
       y += 40 * u;
       lx = Hint(dl, bold_, 22 * u, {x, y}, "B", Rgba(200, 60, 60),
-                german_ ? "Abbrechen (kein neues Profil)" : "Cancel (no new profile)");
+                german_ ? "Abbrechen (kein neues Profil)" : NL("Cancel (no new profile)"));
       (void)lx;
       const bool fresh = confirm, copies = once(ImGuiKey_GamepadFaceLeft) || once(ImGuiKey_X);
       const bool none = once(ImGuiKey_GamepadFaceUp) || once(ImGuiKey_Y);
@@ -428,7 +429,7 @@ void ProfilesScreen::Draw(float width, float height) {
           char text[160];
           std::snprintf(text, sizeof(text),
                         german_ ? (fresh ? "%d Figuren neu angelegt" : "%d Figuren kopiert")
-                                : (fresh ? "%d figures made new" : "%d figures copied"),
+                                : (fresh ? NL("%d figures made new") : NL("%d figures copied")),
                         copied);
           Message(text);
         }
@@ -543,7 +544,7 @@ void ProfilesScreen::Draw(float width, float height) {
       dl->AddRectFilled(p0, {p0.x + panel_w, p0.y + ph}, kPanel, 18 * u);
       dl->AddRect(p0, {p0.x + panel_w, p0.y + ph}, kGold, 18 * u, 0, 3 * u);
       const float x = p0.x + 28 * u, w = panel_w - 56 * u;
-      Text(dl, bold_, 28 * u, {x, p0.y + 22 * u}, kGold, german_ ? "Name des Profils" : "The profile's name");
+      Text(dl, bold_, 28 * u, {x, p0.y + 22 * u}, kGold, german_ ? "Name des Profils" : NL("The profile's name"));
       const ImVec2 f0{x, p0.y + 68 * u}, f1{x + w, p0.y + 124 * u};
       dl->AddRectFilled(f0, f1, Rgba(8, 14, 40, 235), 12 * u);
       dl->AddRect(f0, f1, Rgba(120, 140, 200), 12 * u, 0, 2 * u);
@@ -585,7 +586,7 @@ void ProfilesScreen::Draw(float width, float height) {
           } else {
             const char* labels_de[4] = {"Gro\xC3\x9F", "Leerzeichen", "L\xC3\xB6schen", "Fertig"};
             const char* labels_en[4] = {"Caps", "Space", "Delete", "Done"};
-            label = german_ ? labels_de[c] : labels_en[c];
+            label = german_ ? labels_de[c] : NL(labels_en[c]);
           }
           const float ls = special ? 22 * u : 26 * u;
           Text(dl, bold_, ls, {k0.x + (kw - TextWidth(bold_, ls, label.c_str())) * 0.5f, k0.y + (key_h - ls) * 0.5f - 2 * u},
@@ -609,12 +610,12 @@ void ProfilesScreen::Draw(float width, float height) {
         mode_ = Mode::kList;
       }
       std::snprintf(name_, sizeof(name_), "%s", name.c_str());
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Tippen" : "Type");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "L\xC3\xB6schen" : "Delete", "");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Leerzeichen" : "Space", "");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB", Rgba(80, 90, 140), german_ ? "Gro\xC3\x9F / klein" : "Caps", "");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Start", Rgba(80, 90, 140), german_ ? "Fertig" : "Done", "Enter");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Abbrechen" : "Cancel");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Tippen" : NL("Type"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "L\xC3\xB6schen" : NL("Delete"), "");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Leerzeichen" : NL("Space"), "");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB", Rgba(80, 90, 140), german_ ? "Gro\xC3\x9F / klein" : NL("Caps"), "");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Start", Rgba(80, 90, 140), german_ ? "Fertig" : NL("Done"), "Enter");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Abbrechen" : NL("Cancel"));
       break;
     }
     case Mode::kPicture: {
@@ -626,7 +627,7 @@ void ProfilesScreen::Draw(float width, float height) {
       if (right) picture_ = (picture_ + 1) % pictures_.size();
       draw_panel(330 * u);
       const float x = panel.x + 28 * u, w = panel_w - 56 * u;
-      Text(dl, bold_, 28 * u, {x, panel.y + 22 * u}, kGold, german_ ? "Bild des Profils" : "The profile's picture");
+      Text(dl, bold_, 28 * u, {x, panel.y + 22 * u}, kGold, german_ ? "Bild des Profils" : NL("The profile's picture"));
       // The chosen picture big, its neighbours small at the sides.
       const float cy = panel.y + 180 * u;
       const int m = int(pictures_.size());
@@ -664,9 +665,9 @@ void ProfilesScreen::Draw(float width, float height) {
       } else if (back) {
         mode_ = Mode::kList;
       }
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Nehmen" : "Take it");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Kein Bild" : "No picture");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Nehmen" : NL("Take it"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Kein Bild" : NL("No picture"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
       break;
     }
     case Mode::kDelete: {
@@ -674,11 +675,11 @@ void ProfilesScreen::Draw(float width, float height) {
       const float x = panel.x + 28 * u, w = panel_w - 56 * u;
       const Profile& p = profiles_[selected_];
       Text(dl, bold_, 28 * u, {x, panel.y + 22 * u}, kGold,
-           Fit(bold_, 28 * u, (german_ ? "Profil l\xC3\xB6schen: " : "Delete the profile: ") + p.name, w));
+           Fit(bold_, 28 * u, (german_ ? "Profil l\xC3\xB6schen: " : NL("Delete the profile: ")) + p.name, w));
       Text(dl, regular_, 20 * u, {x, panel.y + 70 * u}, kWhite,
            german_ ? "Seine Spielst\xC3\xA4nde, Erfolge und Figuren kommen in den Papierkorb (von dort lassen "
                      "sie sich wiederherstellen)."
-                   : "Its saves, achievements and figures go to the recycle bin (they can be restored from there).",
+                   : NL("Its saves, achievements and figures go to the recycle bin (they can be restored from there)."),
            w);
       // Two buttons, "Behalten" chosen first (as the games' own yes/no questions): A on a reflex
       // keeps the profile.
@@ -693,7 +694,7 @@ void ProfilesScreen::Draw(float width, float height) {
           const ImVec2 a{x + k * (bw + 20 * u), by}, b{a.x + bw, a.y + bh};
           dl->AddRectFilled(a, b, on ? (is_delete ? Rgba(150, 50, 50) : Rgba(60, 80, 160)) : Rgba(30, 34, 60), 12 * u);
           dl->AddRect(a, b, on ? kGold : kEdge, 12 * u, 0, (on ? 3.0f : 1.5f) * u);
-          const char* label = is_delete ? (german_ ? "L\xC3\xB6schen" : "Delete") : (german_ ? "Behalten" : "Keep it");
+          const char* label = is_delete ? (german_ ? "L\xC3\xB6schen" : NL("Delete")) : (german_ ? "Behalten" : NL("Keep it"));
           Text(dl, bold_, 22 * u, {a.x + (bw - TextWidth(bold_, 22 * u, label)) * 0.5f, a.y + 13 * u}, kWhite, label);
         }
       }
@@ -702,20 +703,20 @@ void ProfilesScreen::Draw(float width, float height) {
       } else if (once(ImGuiKey_GamepadFaceDown) || once(ImGuiKey_Enter)) {
         const bool was_active = p.id == ActiveProfile().id;
         if (DeleteProfile(p)) {
-          Message(german_ ? "Profil gel\xC3\xB6scht (im Papierkorb)" : "Profile deleted (in the recycle bin)");
+          Message(german_ ? "Profil gel\xC3\xB6scht (im Papierkorb)" : NL("Profile deleted (in the recycle bin)"));
           if (was_active) changed_ = true;
           selected_ = 0;
         } else {
           Message(german_ ? "Das Profil lie\xC3\x9F sich nicht l\xC3\xB6schen (l\xC3\xA4uft ein Spiel damit?)"
-                          : "Could not delete the profile (is a game running with it?)");
+                          : NL("Could not delete the profile (is a game running with it?)"));
         }
         Load();
         mode_ = Mode::kList;
       } else if (back) {
         mode_ = Mode::kList;
       }
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "W\xC3\xA4hlen" : "Choose");
-      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(80, 90, 140), german_ ? "Behalten" : "Keep it");
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "W\xC3\xA4hlen" : NL("Choose"));
+      hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(80, 90, 140), german_ ? "Behalten" : NL("Keep it"));
       break;
     }
   }

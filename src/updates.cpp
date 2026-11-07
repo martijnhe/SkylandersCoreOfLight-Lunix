@@ -2,15 +2,24 @@
 
 #include "games.h"  // VersionLess
 
+#ifndef _WIN32
+#include <curl/curl.h>
+#include <strings.h>
+#endif
+#ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
 #include <shlobj.h>
 #include <winhttp.h>
+#endif
+#include "hub_log.h"
+#include "platform.h"
 
 #include <cctype>
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -199,6 +208,7 @@ class JsonParser {
   bool ok_ = true;
 };
 
+#ifdef _WIN32
 // --- HTTPS through WinHTTP -------------------------------------------------------------------
 
 std::wstring Wide(const std::string& s) {
@@ -212,8 +222,10 @@ std::wstring Wide(const std::string& s) {
 // A GET of `url` (redirects followed, as GitHub's downloads need), the body handed to `sink` in
 // pieces (false from it stops); `total` gets the length when the server says it. True if the
 // status was 200 and the whole body went to the sink.
-bool HttpGet(const std::string& url, const wchar_t* headers, const std::function<bool(const char*, size_t)>& sink,
-             uint64_t* total) {
+bool HttpGet(const std::string& url, const std::string& header_lines,
+             const std::function<bool(const char*, size_t)>& sink, uint64_t* total) {
+  const std::wstring header_text = Wide(header_lines);
+  const wchar_t* headers = header_text.empty() ? nullptr : header_text.c_str();
   const std::wstring wurl = Wide(url);
   URL_COMPONENTS parts{sizeof(parts)};
   wchar_t host[256] = L"", path[2048] = L"";
@@ -276,31 +288,84 @@ bool HttpGet(const std::string& url, const wchar_t* headers, const std::function
   if (session) WinHttpCloseHandle(session);
   return ok;
 }
+#else
+// --- HTTPS through libcurl -------------------------------------------------------------------
 
-fs::path LocalDataDir() {
-  PWSTR path = nullptr;
-  fs::path dir;
-  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &path))) dir = path;
-  CoTaskMemFree(path);
-  return dir / "CoreOfLight";
+// The same GET as WinHTTP's above: redirects followed, the body to `sink`, 200 only. The system's
+// CA certificates (on SteamOS too); the same timeouts (10 s to connect, no 30 s without data).
+bool HttpGet(const std::string& url, const std::string& header_lines,
+             const std::function<bool(const char*, size_t)>& sink, uint64_t* total) {
+  static std::once_flag init;
+  std::call_once(init, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+  CURL* curl = curl_easy_init();
+  if (!curl) return false;
+  struct State {
+    const std::function<bool(const char*, size_t)>* sink;
+    bool stopped = false;
+  } state{&sink};
+  curl_slist* headers = nullptr;
+  for (size_t start = 0; start < header_lines.size();) {
+    size_t end = header_lines.find("\r\n", start);
+    if (end == std::string::npos) end = header_lines.size();
+    if (end > start) headers = curl_slist_append(headers, header_lines.substr(start, end - start).c_str());
+    start = end + 2;
+  }
+  const std::string agent = "CoreOfLight/" COREOFLIGHT_VERSION;
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, agent.c_str());
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 10L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1L);
+  curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);  // called from background threads
+  curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);  // no body for anything but 2xx
+  if (headers) curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &state);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, +[](char* data, size_t size, size_t n, void* user) -> size_t {
+    auto* st = static_cast<State*>(user);
+    if (!(*st->sink)(data, size * n)) {
+      st->stopped = true;
+      return 0;  // stops the transfer
+    }
+    return size * n;
+  });
+  if (total) {
+    *total = 0;
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, total);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, +[](char* data, size_t size, size_t n, void* user) -> size_t {
+      // The last response's Content-Length (a redirect's comes first and is replaced).
+      const std::string line(data, size * n);
+      if (line.size() > 15 && strncasecmp(line.c_str(), "content-length:", 15) == 0) {
+        *static_cast<uint64_t*>(user) = std::strtoull(line.c_str() + 15, nullptr, 10);
+      }
+      return size * n;
+    });
+  }
+  const CURLcode result = curl_easy_perform(curl);
+  long status = 0;
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+  if (result != CURLE_OK && !state.stopped) HubWarn(std::string("http: ") + curl_easy_strerror(result));
+  curl_slist_free_all(headers);
+  curl_easy_cleanup(curl);
+  return result == CURLE_OK && status == 200 && !state.stopped;
 }
+#endif
+
+fs::path LocalDataDir() { return platform::LocalDataDir(); }
 
 fs::path KnownReleasesFile() { return LocalDataDir() / "releases.txt"; }
 
-uint64_t Now() {
-  FILETIME t;
-  GetSystemTimeAsFileTime(&t);
-  return uint64_t(t.dwHighDateTime) << 32 | t.dwLowDateTime;
-}
+uint64_t Now() { return platform::NowFileTime(); }
 
 }  // namespace
 
 std::optional<Release> FetchLatestRelease(const std::string& repo, const std::string& asset_prefix,
-                                          const std::string& extension) {
+                                          const std::string& extension, bool* answered) {
   // /releases rather than /releases/latest: that one leaves out pre-releases, and ours are betas.
   std::string body;
   const std::string url = "https://api.github.com/repos/" + std::string(kOwner) + "/" + repo + "/releases?per_page=10";
-  if (!HttpGet(url, L"Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28",
+  if (!HttpGet(url, "Accept: application/vnd.github+json\r\nX-GitHub-Api-Version: 2022-11-28",
                [&](const char* data, size_t n) {
                  body.append(data, n);
                  return body.size() < (size_t(8) << 20);
@@ -310,6 +375,7 @@ std::optional<Release> FetchLatestRelease(const std::string& repo, const std::st
   }
   Json releases;
   if (!JsonParser(body).Parse(releases) || releases.kind != Json::Kind::kArray) return std::nullopt;
+  if (answered) *answered = true;
   // The highest version with its setup, not the first in the list: GitHub sorts the list by the
   // tag as text there, so v0.1.0-beta.10 came after beta.7 and the launcher (beta.9) never saw it.
   std::optional<Release> best;
@@ -377,35 +443,7 @@ bool UpdateCheckDue() {
   return checked == 0 || Now() - checked > kInterval;
 }
 
-std::string FileSha256(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
-  if (!in) return {};
-  BCRYPT_ALG_HANDLE alg = nullptr;
-  BCRYPT_HASH_HANDLE hash = nullptr;
-  if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return {};
-  std::string out;
-  if (BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-    std::vector<char> buffer(1 << 20);
-    bool ok = true;
-    while (in) {
-      in.read(buffer.data(), std::streamsize(buffer.size()));
-      const auto n = in.gcount();
-      if (n > 0 && BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()), ULONG(n), 0) != 0) {
-        ok = false;
-        break;
-      }
-    }
-    unsigned char digest[32];
-    if (ok && BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
-      char hex[65];
-      for (int i = 0; i < 32; ++i) std::snprintf(hex + 2 * i, 3, "%02x", digest[i]);
-      out.assign(hex, 64);
-    }
-    BCryptDestroyHash(hash);
-  }
-  BCryptCloseAlgorithmProvider(alg, 0);
-  return out;
-}
+std::string FileSha256(const fs::path& file) { return platform::FileSha256Hex(file); }
 
 bool DownloadFile(const std::string& url, const fs::path& file, std::atomic<float>* progress,
                   const std::atomic<bool>* cancel, const std::string& sha256) {
@@ -418,7 +456,7 @@ bool DownloadFile(const std::string& url, const fs::path& file, std::atomic<floa
   {
     std::ofstream out(part, std::ios::binary | std::ios::trunc);
     if (!out) return false;
-    ok = HttpGet(url, nullptr,
+    ok = HttpGet(url, {},
                  [&](const char* data, size_t n) {
                    out.write(data, std::streamsize(n));
                    done += n;
@@ -443,9 +481,14 @@ bool DownloadFile(const std::string& url, const fs::path& file, std::atomic<floa
 }
 
 fs::path DownloadsDir() {
-  wchar_t temp[MAX_PATH] = L"";
-  GetTempPathW(MAX_PATH, temp);
-  return fs::path(temp) / "CoreOfLight" / "downloads";
+#ifdef _WIN32
+  return platform::TempDir() / "downloads";
+#else
+  // Not /tmp: a RAM disk on many systems, the Steam Deck's too.
+  const std::string cache = platform::Env("XDG_CACHE_HOME");
+  const fs::path base = cache.empty() ? platform::GetUserFolder(platform::UserFolder::kHome) / ".cache" : fs::path(cache);
+  return base / "CoreOfLight" / "downloads";
+#endif
 }
 
 namespace {

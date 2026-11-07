@@ -1,7 +1,14 @@
 #include "gpu_tier.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <dxgi.h>
+#else
+#include <GL/gl.h>
+
+#include <filesystem>
+#include <fstream>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +20,7 @@ namespace coreoflight {
 
 namespace {
 
+#ifdef _WIN32
 std::string Narrow(const wchar_t* text) {
   const int size = WideCharToMultiByte(CP_UTF8, 0, text, -1, nullptr, 0, nullptr, nullptr);
   if (size <= 1) return {};
@@ -20,6 +28,7 @@ std::string Narrow(const wchar_t* text) {
   WideCharToMultiByte(CP_UTF8, 0, text, -1, out.data(), size, nullptr, nullptr);
   return out;
 }
+#endif
 
 bool Has(const std::string& upper, std::string_view part) { return upper.find(part) != std::string::npos; }
 
@@ -72,6 +81,7 @@ std::string WeakGpuReason(const GpuInfo& gpu) {
 
 namespace {
 
+#ifdef _WIN32
 GpuInfo Detect() {
   GpuInfo gpu;
   IDXGIFactory1* factory = nullptr;
@@ -88,6 +98,41 @@ GpuInfo Detect() {
     break;
   }
   factory->Release();
+#else
+// Off Windows: the name from the OpenGL context (main_sdl.cpp has made it current), the vendor and
+// AMD's own memory from the card in sysfs, NVIDIA's memory through GL_NVX_gpu_memory_info. Intel's
+// and the Steam Deck's graphics report none of their own: integrated.
+uint64_t ReadNumber(const std::filesystem::path& file) {
+  std::ifstream in(file);
+  std::string text;
+  in >> text;
+  return text.empty() ? 0 : std::strtoull(text.c_str(), nullptr, 0);
+}
+
+GpuInfo Detect() {
+  GpuInfo gpu;
+  if (const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER))) gpu.name = renderer;
+  std::error_code ec;
+  for (auto it = std::filesystem::directory_iterator("/sys/class/drm", ec);
+       !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+    const std::string card = it->path().filename().string();
+    if (card.rfind("card", 0) != 0 || card.find('-') != std::string::npos) continue;
+    const uint64_t vendor = ReadNumber(it->path() / "device" / "vendor");
+    if (!vendor) continue;
+    gpu.vendor = uint32_t(vendor);
+    gpu.vram_mb = ReadNumber(it->path() / "device" / "mem_info_vram_total") >> 20;
+    if (gpu.vram_mb >= 1024) break;  // a card with its own memory before an integrated one
+  }
+  if (gpu.vendor == 0x10DE) {
+    constexpr GLenum kDedicatedVidmemNvx = 0x9047;  // GL_GPU_MEMORY_INFO_DEDICATED_VIDMEM_NVX, in KB
+    GLint kb = 0;
+    glGetIntegerv(kDedicatedVidmemNvx, &kb);
+    while (glGetError() != GL_NO_ERROR) {
+    }
+    // Without the extension (nouveau) the size isn't known: a card of its own is no integrated one.
+    gpu.vram_mb = kb > 0 ? uint64_t(kb) >> 10 : 6 * 1024;
+  }
+#endif
   if (gpu.name.empty()) return gpu;  // none found (Wine without a driver): leave the scale as it was
   gpu.reason = WeakGpuReason(gpu);
   gpu.weak = !gpu.reason.empty();

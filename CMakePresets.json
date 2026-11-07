@@ -7,7 +7,25 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/out/build/release",
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Release (Ninja, Linux: SDL3, OpenGL, libcurl, OpenSSL)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-release",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "steamdeck",
+      "displayName": "Release (Linux, self-contained for the Steam Deck: run tools/build_steamdeck.sh)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/steamdeck",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "COREOFLIGHT_SELF_CONTAINED": "ON" }
     }
   ],
-  "buildPresets": [{ "name": "release", "configurePreset": "release" }]
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "steamdeck", "configurePreset": "steamdeck" }
+  ]
 }

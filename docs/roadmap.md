@@ -63,4 +63,5 @@ resolution, the native 3D picture.
 | Now | Keep the parts the hub needs shared: menus, figure decoding and the figure folder stay in `skylanders-portal` | me |
 | Now | Phase 1, the launcher: first version built 2026-10-22 (finds, checks and starts the games); the settings pages (#7), setting up a disc from an ISO (#6) and a first figure library (#8,
 without pictures yet) followed the same night | me, a try by the owner |
+| Now | Linux and Steam Deck launcher (2026-11-06): native SDL3 / OpenGL build next to the Windows one, the games' Linux builds as release archives, menu entries for the launcher and the installed games; the games' Linux releases are still to come | me |
 | Later | Figure library, profiles; online co-op only after the owner agrees to the proposal | both |

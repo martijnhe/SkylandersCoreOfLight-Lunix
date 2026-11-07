@@ -13,6 +13,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"  // GetKeyData: how long a key is held (the slider speeds up)
 #include "nxe_art.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -120,11 +121,11 @@ bool SettingsScreen::SetActionLabel(const std::string& cvar, const std::string& 
 
 std::string SettingsScreen::ValueLabel(const GameSetting& s) const {
   for (const SettingChoice& o : s.options) {
-    if (SameValue(o.value, s.value)) return german_ ? o.de : o.en;
+    if (SameValue(o.value, s.value)) return german_ ? o.de : NL(o.en);
   }
-  if (s.options.empty() && s.type == "bool") return IsOn(s.value) ? (german_ ? "An" : "On") : (german_ ? "Aus" : "Off");
+  if (s.options.empty() && s.type == "bool") return IsOn(s.value) ? (german_ ? "An" : NL("On")) : (german_ ? "Aus" : NL("Off"));
   if (s.slider_max > s.slider_min) return s.value + s.slider_unit;
-  if (s.value.empty()) return german_ ? "Eigene Einstellung" : "Custom";
+  if (s.value.empty()) return german_ ? "Eigene Einstellung" : NL("Custom");
   return s.value;
 }
 
@@ -245,11 +246,11 @@ void SettingsScreen::Save() {
   char text[160];
   if (!ok) {
     std::snprintf(text, sizeof(text), "%s", german_ ? "Konnte die Einstellungsdatei nicht schreiben"
-                                                    : "Could not write the settings file");
+                                                    : NL("Could not write the settings file"));
   } else if (n) {
-    std::snprintf(text, sizeof(text), german_ ? "%zu Einstellung(en) gespeichert" : "%zu setting(s) saved", n);
+    std::snprintf(text, sizeof(text), german_ ? "%zu Einstellung(en) gespeichert" : NL("%zu setting(s) saved"), n);
   } else {
-    std::snprintf(text, sizeof(text), "%s", german_ ? "Nichts ge\xC3\xA4ndert" : "Nothing changed");
+    std::snprintf(text, sizeof(text), "%s", german_ ? "Nichts ge\xC3\xA4ndert" : NL("Nothing changed"));
   }
   message_ = text;
   message_until_ = ImGui::GetTime() + 3.0;
@@ -269,7 +270,7 @@ void SettingsScreen::Draw(float width, float height) {
   ImDrawList* dl = ImGui::GetWindowDrawList();
   const float u = UiScale(width, height);
   DrawBackdrop(dl, width, height, background_);
-  Text(dl, bold_, 22 * u, {48 * u, 30 * u}, kDim, german_ ? "EINSTELLUNGEN" : "SETTINGS");
+  Text(dl, bold_, 22 * u, {48 * u, 30 * u}, kDim, german_ ? "EINSTELLUNGEN" : NL("SETTINGS"));
   Text(dl, bold_, 44 * u, {46 * u, 52 * u}, kGold, title_);
 
   // While the "save the changes?" question is up (confirm_discard_), only it takes input.
@@ -280,12 +281,12 @@ void SettingsScreen::Draw(float width, float height) {
   if (!edit_) {
     const int state = loader_ ? loader_->state() : -1;
     const char* text = state == 0 ? (german_ ? "Die Einstellungen des Spiels werden gelesen ..."
-                                             : "Reading the game's settings ...")
+                                             : NL("Reading the game's settings ..."))
                                   : (german_ ? "Das Spiel hat seine Einstellungen nicht genannt (\xC3\xA4ltere Version? "
                                                "Neu bauen hilft)."
-                                             : "The game didn't tell its settings (an older build? Rebuilding helps).");
+                                             : NL("The game didn't tell its settings (an older build? Rebuilding helps)."));
     Text(dl, regular_, 24 * u, {left, top + 20 * u}, kDim, text, width - 2 * left);
-    Hint(dl, bold_, 22 * u, {left, height - 52 * u}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+    Hint(dl, bold_, 22 * u, {left, height - 52 * u}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
     if (back) open_ = false;
     ImGui::End();
     return;
@@ -305,7 +306,7 @@ void SettingsScreen::Draw(float width, float height) {
   float tx = left;
   const float tab_size = 22 * u;
   for (int i = 0; i < int(pages.size()); ++i) {
-    const std::string& name = german_ ? pages[i].de : pages[i].en;
+    const std::string& name = german_ ? pages[i].de : NL(pages[i].en);
     const float w = TextWidth(bold_, tab_size, name.c_str()) + 36 * u;
     const ImVec2 a{tx, top}, b{tx + w, top + 44 * u};
     const bool hovered = !asking && io.MousePos.x >= a.x && io.MousePos.x < b.x && io.MousePos.y >= a.y &&
@@ -407,7 +408,7 @@ void SettingsScreen::Draw(float width, float height) {
     dl->AddRectFilled(a, b, chosen ? Rgba(60, 70, 140, 240) : kPanel, 16 * u);
     if (chosen) dl->AddRect(a, b, enabled ? kGold : kEdge, 16 * u, 0, 3 * u);
     const bool changed = !s.cvar.empty() && changes_.count(s.cvar);
-    const std::string& label = german_ ? s.de : s.en;
+    const std::string& label = german_ ? s.de : NL(s.en);
     const ImU32 greyed = Rgba(110, 118, 150);
     Text(dl, regular_, 22 * u, {a.x + 18 * u, y + 9 * u}, !enabled ? greyed : changed ? kGold : kWhite, label);
     const float vs = 21 * u;
@@ -450,10 +451,10 @@ void SettingsScreen::Draw(float width, float height) {
     const GameSetting& s = settings[row_];
     dl->AddRectFilled({px, list_top}, {px + pw, bottom - 10 * u}, kPanel, 18 * u);
     dl->AddRect({px, list_top}, {px + pw, bottom - 10 * u}, kEdge, 18 * u, 0, 2 * u);
-    Text(dl, bold_, 24 * u, {px + 20 * u, list_top + 16 * u}, kWhite, german_ ? s.de : s.en, pw - 40 * u);
-    std::string help = german_ ? s.help_de : s.help_en;
+    Text(dl, bold_, 24 * u, {px + 20 * u, list_top + 16 * u}, kWhite, german_ ? s.de : NL(s.en), pw - 40 * u);
+    std::string help = german_ ? s.help_de : NL(s.help_en);
     if (const GameSetting* needs = nullptr; !Enabled(s, &needs) && needs) {
-      help = (german_ ? "Nur mit \xE2\x80\x9E" + needs->de + "\xE2\x80\x9C an. " : "Only with \"" + needs->en + "\" on. ") + help;
+      help = (german_ ? "Nur mit \xE2\x80\x9E" + needs->de + "\xE2\x80\x9C an. " : NL("Only with \"") + NL(needs->en) + NL("\" on. ")) + help;
     }
     Text(dl, regular_, 20 * u, {px + 20 * u, list_top + 58 * u}, kDim, help, pw - 40 * u);
     // The note at the bottom (the launcher's "what's new"), below the help when there is room.
@@ -463,16 +464,16 @@ void SettingsScreen::Draw(float width, float height) {
           list_top + 58 * u + regular_->CalcTextSizeA(20 * u, FLT_MAX, pw - 40 * u, help.c_str()).y;
       float note_h = 34 * u;
       for (const auto& [en, de] : note_lines_) {
-        note_h += regular_->CalcTextSizeA(line_size, FLT_MAX, wrap, (german_ ? de : en).c_str()).y + 8 * u;
+        note_h += regular_->CalcTextSizeA(line_size, FLT_MAX, wrap, (german_ ? de : NL(en)).c_str()).y + 8 * u;
       }
       float ny = bottom - 30 * u - note_h;
       if (ny > help_bottom + 24 * u) {
         dl->AddLine({px + 20 * u, ny - 14 * u}, {px + pw - 20 * u, ny - 14 * u}, kEdge, 1.5f * u);
-        Text(dl, bold_, 20 * u, {px + 20 * u, ny}, kGold, german_ ? note_title_.second : note_title_.first,
+        Text(dl, bold_, 20 * u, {px + 20 * u, ny}, kGold, german_ ? note_title_.second : NL(note_title_.first),
              pw - 40 * u);
         ny += 34 * u;
         for (const auto& [en, de] : note_lines_) {
-          const std::string& line = german_ ? de : en;
+          const std::string line = german_ ? de : NL(en);
           dl->AddCircleFilled({px + 28 * u, ny + line_size * 0.55f}, 3 * u, kGold);
           Text(dl, regular_, line_size, {px + 40 * u, ny}, kDim, line, wrap);
           ny += regular_->CalcTextSizeA(line_size, FLT_MAX, wrap, line.c_str()).y + 8 * u;
@@ -486,10 +487,10 @@ void SettingsScreen::Draw(float width, float height) {
   float hx = left;
   const float hy = height - 52 * u;
   if (!asking) {
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Seite" : "Page");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x84ndern" : "Change");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Speichern" : "Save");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Seite" : NL("Page"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x84ndern" : NL("Change"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Speichern" : NL("Save"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
     if (back) {
       if (!changes_.empty()) {
         confirm_discard_ = true;
@@ -504,17 +505,17 @@ void SettingsScreen::Draw(float width, float height) {
     dl->AddRectFilled(a, b, Rgba(20, 26, 64, 250), 18 * u);
     dl->AddRect(a, b, kGold, 18 * u, 0, 3 * u);
     Text(dl, bold_, 28 * u, {a.x + 28 * u, a.y + 22 * u}, kGold,
-         german_ ? "\xC3\x84nderungen speichern?" : "Save the changes?");
+         german_ ? "\xC3\x84nderungen speichern?" : NL("Save the changes?"));
     char text[160];
     std::snprintf(text, sizeof(text),
-                  german_ ? "%zu Einstellung(en) ge\xC3\xA4ndert, noch nicht gespeichert." : "%zu setting(s) changed, not saved yet.",
+                  german_ ? "%zu Einstellung(en) ge\xC3\xA4ndert, noch nicht gespeichert." : NL("%zu setting(s) changed, not saved yet."),
                   changes_.size());
     Text(dl, regular_, 20 * u, {a.x + 28 * u, a.y + 70 * u}, kWhite, text, pw - 56 * u);
     float bx = a.x + 28 * u;
     const float by = b.y - 52 * u;
-    bx = Hint(dl, bold_, 22 * u, {bx, by}, "A", Rgba(70, 170, 70), german_ ? "Speichern" : "Save");
-    bx = Hint(dl, bold_, 22 * u, {bx, by}, "X", Rgba(50, 120, 220), german_ ? "Verwerfen" : "Throw away");
-    bx = Hint(dl, bold_, 22 * u, {bx, by}, "B", Rgba(200, 60, 60), german_ ? "Weiter bearbeiten" : "Keep editing");
+    bx = Hint(dl, bold_, 22 * u, {bx, by}, "A", Rgba(70, 170, 70), german_ ? "Speichern" : NL("Save"));
+    bx = Hint(dl, bold_, 22 * u, {bx, by}, "X", Rgba(50, 120, 220), german_ ? "Verwerfen" : NL("Throw away"));
+    bx = Hint(dl, bold_, 22 * u, {bx, by}, "B", Rgba(200, 60, 60), german_ ? "Weiter bearbeiten" : NL("Keep editing"));
     if (ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
       Save();
       open_ = false;

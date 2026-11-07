@@ -1,8 +1,10 @@
 #include "games.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
 #include <shlobj.h>
+#endif
 
 #include <algorithm>
 #include <cctype>
@@ -22,6 +24,7 @@
 #include "handheld.h"
 #include "hub_log.h"  // WineVersion
 #include "profiles.h"
+#include "platform.h"
 #include "xiso.h"  // Sha256Hex
 
 namespace coreoflight {
@@ -32,38 +35,46 @@ namespace fs = std::filesystem;
 constexpr char kConfigFile[] = "coreoflight.ini";
 // "figures = <folder>" in coreoflight.ini, as a game's portal_figures_dir: empty for the shared one.
 fs::path g_figures_dir;
+#ifdef _WIN32
 constexpr wchar_t kBuildDir[] = L"out\\build\\win-amd64-release";
+// The game's program: its exe on Windows, the same name without ".exe" elsewhere.
+#define COREOFLIGHT_GAME_EXE(name) name ".exe"
+#else
+// A developer's Linux build of a game (its CMakePresets' linux-amd64-release).
+constexpr char kBuildDir[] = "out/build/linux-amd64-release";
+#define COREOFLIGHT_GAME_EXE(name) name
+#endif
 
 // Each repository pins its disc's default.xex in docs/game/default.xex.sha256 and its code in
 // docs/game/default.xex.code: another pressing with the same code (another language set) runs too.
 const std::vector<Game> kGames = {
-    {"ssa", "Spyro's Adventure", "Spyro's Adventure", 2011, "ssarecompiled.exe", "SSARecomp",
+    {"ssa", "Spyro's Adventure", "Spyro's Adventure", 2011, COREOFLIGHT_GAME_EXE("ssarecompiled"), "SSARecomp",
      "Spyro's Adventure Recompiled",
      "e195f5130c1e23fb4654baf7c383ef97d02c89aeb7d4389705ae31235646ef7b,"
      "82110000:0a6b070c95f730a77a8662afdbbb297a15ce8a465c344951ab5ff1bb94bd802d", 16, 0,
      "{2B356600-5297-425A-A646-8498A7AAC307}"},
-    {"giants", "Giants", "Giants", 2012, "giantsrecompiled.exe", "GiantsRecomp", "Giants Recompiled",
+    {"giants", "Giants", "Giants", 2012, COREOFLIGHT_GAME_EXE("giantsrecompiled"), "GiantsRecomp", "Giants Recompiled",
      "12d1e29e4f07fbc559bc1a4988dd6bf346c3d16e30cbf862e2683e862f9fc09e,"
      "82150000:9fb7c356cbba689b46370ce2c1d5228e8e41b47d019ddfbdf49fd8a96c6584fe", 112, 4614,
      "{1F12B332-CD84-471A-BE9F-7F3BFA614A6D}"},
-    {"swapforce", "Swap Force", "Swap Force", 2013, "swapforcerecompiled.exe", "SwapForceRecomp",
+    {"swapforce", "Swap Force", "Swap Force", 2013, COREOFLIGHT_GAME_EXE("swapforcerecompiled"), "SwapForceRecomp",
      "Swap Force Recompiled",
      "dc58d3851bbd89935e9ecf2ee84b158ec400f049da46c937a4713477a50c79d7,"
      "823E0000:0dcab6aa8cfb5c82f42e603d165a1966615073bf1f4372bd1733cd5fcca3e31b", 2015, 8192,
      "{C3E00C3F-6CE0-4100-BD9B-13F9B4A8CCBA}"},
-    {"trapteam", "Trap Team", "Trap Team", 2014, "trapteamrecompiled.exe", "TrapTeamRecomp",
+    {"trapteam", "Trap Team", "Trap Team", 2014, COREOFLIGHT_GAME_EXE("trapteamrecompiled"), "TrapTeamRecomp",
      "Trap Team Recompiled",
      "f1d2373e4507e21cc371e6f22d02e909602a1b5bc4704896c3c099cc64002a35,"
      "821A0000:08c372fa42acfd04eb2d3ec047dfe92552e67c597d46f4f174673d2ee8c65687", 462, 12288,
      "{9A774956-7256-4E2C-A3D6-418903FC71B6}"},
-    {"superchargers", "SuperChargers", "SuperChargers", 2015, "superchargersrecompiled.exe",
+    {"superchargers", "SuperChargers", "SuperChargers", 2015, COREOFLIGHT_GAME_EXE("superchargersrecompiled"),
      "SuperChargersRecomp", "SuperChargers Recompiled",
      // The European English / German disc and the Spanish / Italian one (the same build).
      "02ff6672d460c9aaa54e69d584af67a7138c6c93cde5e04b0da4284207be7c61,"
      "02846647633e93c627e74b92d3ad63a90e1504546958fc8d81e28ac65de1f9bc,"
      "82450000:3140330d024070a570409f8ebb651593ffdf5e038495721f2ca3538dbecd4671", 3412, 16640,
      "{44F04CDA-C049-4558-AAA6-25A6E7932D71}"},
-    {"imaginators", "Imaginators", "Imaginators", 2016, "imaginatorsrecompiled.exe",
+    {"imaginators", "Imaginators", "Imaginators", 2016, COREOFLIGHT_GAME_EXE("imaginatorsrecompiled"),
      "ImaginatorsRecomp", "Imaginators Recompiled",
      "4298c4f6fb1684bed34dd8d2292b508782b37e3709ba1ed58b08ec334a9f7029,"
      "82480000:91c6d66ea09dff54b1650fb9b446081dcb180095e9d29b60a0432ea284e8ea7f", 601, 20480,
@@ -80,6 +91,7 @@ fs::path Utf8Path(const std::string& s) {
   return fs::path(std::u8string(reinterpret_cast<const char8_t*>(s.data()), s.size()));
 }
 
+#ifdef _WIN32
 fs::path KnownFolder(REFKNOWNFOLDERID id) {
   PWSTR path = nullptr;
   fs::path out;
@@ -87,6 +99,20 @@ fs::path KnownFolder(REFKNOWNFOLDERID id) {
   CoTaskMemFree(path);
   return out;
 }
+
+// Where the games' setups put them by default: %LOCALAPPDATA%\Programs.
+fs::path DefaultGamesFolder() { return KnownFolder(FOLDERID_LocalAppData) / "Programs"; }
+#else
+// Off Windows the launcher unpacks each game itself (StartGameInstall): into
+// ~/.local/share/CoreOfLight/Games/<app name> by default.
+fs::path DefaultGamesFolder() { return platform::LocalDataDir() / "Games"; }
+
+// What an install from the launcher left (it stands for the setup's uninstall entry on Windows):
+// <local data>/installed/<key>.ini with "location = <folder>" and "version = <version>".
+fs::path InstallRecord(const Game& game) {
+  return platform::LocalDataDir() / "installed" / (std::string(game.key) + ".ini");
+}
+#endif
 
 }  // namespace
 
@@ -112,7 +138,12 @@ namespace {
 fs::path g_documents_dir;  // --documents=<folder>
 }  // namespace
 
+#ifdef _WIN32
 fs::path DocumentsDir() { return g_documents_dir.empty() ? KnownFolder(FOLDERID_Documents) : g_documents_dir; }
+#else
+// The same Documents folder as the games' (skylanders-portal data_folder.h DocumentsFolder).
+fs::path DocumentsDir() { return g_documents_dir.empty() ? skylanders::DocumentsFolder() : g_documents_dir; }
+#endif
 
 void SetDocumentsDir(const fs::path& dir) { g_documents_dir = dir; }
 
@@ -138,7 +169,7 @@ fs::path SkylandersDir() {
 
 std::string StoredFolder(const fs::path& dir) {
   const fs::path portable = skylanders::PortableFolder();
-  const std::wstring inside = portable.native() + L"\\";
+  const fs::path::string_type inside = portable.native() + fs::path::string_type(1, fs::path::preferred_separator);
   const fs::path keep = !portable.empty() && dir.native().starts_with(inside) ? dir.lexically_relative(portable) : dir;
   const std::u8string u8 = keep.u8string();
   return std::string(u8.begin(), u8.end());
@@ -184,39 +215,10 @@ void FindRom(const fs::path& exe, fs::path& workdir, fs::path& rom) {
   rom = workdir / "rom";
 }
 
-// SHA-256 of a file with Windows' own CNG, as lower-case hex; empty if it can't be read.
-std::string Sha256(const fs::path& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) return {};
-  BCRYPT_ALG_HANDLE alg = nullptr;
-  BCRYPT_HASH_HANDLE hash = nullptr;
-  if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) return {};
-  std::string out;
-  if (BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0) {
-    std::vector<char> buffer(1 << 20);
-    bool ok = true;
-    while (in) {
-      in.read(buffer.data(), std::streamsize(buffer.size()));
-      const auto n = in.gcount();
-      if (n > 0 && BCryptHashData(hash, reinterpret_cast<PUCHAR>(buffer.data()), ULONG(n), 0) != 0) {
-        ok = false;
-        break;
-      }
-    }
-    unsigned char digest[32];
-    if (ok && BCryptFinishHash(hash, digest, sizeof(digest), 0) == 0) {
-      char hex[65];
-      for (int i = 0; i < 32; ++i) std::snprintf(hex + 2 * i, 3, "%02x", digest[i]);
-      out.assign(hex, 64);
-    }
-    BCryptDestroyHash(hash);
-  }
-  BCryptCloseAlgorithmProvider(alg, 0);
-  return out;
-}
 
 // Where the game's installer put it: InstallLocation of its uninstall entry (per user, else for
 // everyone), wherever that is (a library folder, a folder chosen in the setup).
+#ifdef _WIN32
 fs::path InstalledByEntry(const Game& game) {
   const std::wstring key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" +
                            Utf8Path(game.app_id).wstring() + L"_is1";
@@ -231,6 +233,15 @@ fs::path InstalledByEntry(const Game& game) {
   }
   return {};
 }
+#else
+fs::path InstalledByEntry(const Game& game) {
+  const auto record = ReadIni(InstallRecord(game));
+  const auto it = record.find("location");
+  if (it == record.end() || it->second.empty()) return {};
+  const fs::path exe = Utf8Path(it->second) / game.exe;
+  return IsFile(exe) ? exe : fs::path();
+}
+#endif
 
 // The game in the games folder: <folder>\<app name>, <folder>\<repo>, the folder itself, then any
 // folder up to two levels down that holds its exe (folders named as the owner likes).
@@ -279,7 +290,7 @@ fs::path FindExe(const Game& game, const fs::path& launcher_dir,
   if (portable) {
     if (fs::path p = InstalledByEntry(game); !p.empty()) return p;
   }
-  const fs::path installed = KnownFolder(FOLDERID_LocalAppData) / "Programs" / game.app_name / game.exe;
+  const fs::path installed = DefaultGamesFolder() / game.app_name / game.exe;
   if (IsFile(installed)) return installed;
   for (const fs::path& p : {launcher_dir / game.exe, launcher_dir / game.repo / game.exe,
                             launcher_dir / game.app_name / game.exe}) {
@@ -360,14 +371,16 @@ void FindGames(std::vector<Found>& found, const fs::path& launcher_dir) {
   }
 }
 
+#ifdef _WIN32
 bool StartGame(const Found& game, std::wstring& error, void** process) {
   STARTUPINFOW startup = {sizeof(startup)};
   PROCESS_INFORMATION info = {};
   // The active profile's own user data (profiles.h); nothing for the main profile. Started from
   // here, the game's F4 menu leaves out the graphics and start-up settings: they are on its card
   // (skylanders-portal settings_menu.h, #10).
-  std::wstring command = L"\"" + game.exe.wstring() + L"\"" + ProfileArguments(game.exe) +
-                         L" --started_by_launcher=true";
+  std::wstring command = L"\"" + game.exe.wstring() + L"\"";
+  for (const std::string& arg : ProfileArguments(game.exe)) command += L" \"" + Utf8Path(arg).wstring() + L"\"";
+  command += L" --started_by_launcher=true";
   // The profile's name as the player's gamertag, where a game shows one (the SDK's user_name, up to
   // 15 characters; quotes left out so the command line stays whole).
   std::string name = ActiveProfile().name;
@@ -388,9 +401,32 @@ bool StartGame(const Found& game, std::wstring& error, void** process) {
   *process = info.hProcess;
   return true;
 }
+#endif
+
+#ifndef _WIN32
+bool StartGame(const Found& game, std::wstring& error, void** process) {
+  // As on Windows: the profile's user data, the launcher's flag and the profile's name as the
+  // gamertag (up to 15 characters, whole UTF-8 characters).
+  std::vector<std::string> args = ProfileArguments(game.exe);
+  args.push_back("--started_by_launcher=true");
+  std::string name = ActiveProfile().name;
+  size_t keep = std::min<size_t>(name.size(), 15);
+  while (keep > 0 && keep < name.size() && (static_cast<unsigned char>(name[keep]) & 0xC0) == 0x80) --keep;
+  name.resize(keep);
+  if (!name.empty()) args.push_back("--user_name=" + name);
+  std::string why;
+  *process = platform::StartProcess(game.exe, args, game.workdir, false, &why);
+  if (!*process) {
+    error = Utf8Path(why).wstring();
+    return false;
+  }
+  return true;
+}
+#endif
 
 void SetInstallDir(const fs::path& dir) { g_install_dir = dir; }
 
+#ifdef _WIN32
 namespace {
 
 // Volume and file id of a folder, to tell whether two paths are the same folder.
@@ -418,22 +454,46 @@ fs::path RealFolder(const fs::path& dir) {
                     a.nFileIndexLow == b.nFileIndexLow;
   return same ? real : dir;
 }
+#else
+// Only Wine has the Z:\home vs. Z:\var\home trouble: off Windows a folder is itself.
+fs::path RealFolder(const fs::path& dir) { return dir; }
+#endif
 
 fs::path GamesFolder() {
   if (!g_install_dir.empty()) return g_install_dir;
   // Portable (#47): the games next to Core of Light as well.
   if (const fs::path portable = skylanders::PortableFolder(); !portable.empty()) return portable / "Games";
-  return KnownFolder(FOLDERID_LocalAppData) / "Programs";
+  return DefaultGamesFolder();
 }
 
 bool GamesFolderChosen() { return !g_install_dir.empty(); }
 
 fs::path InstallFolder(const Game& game) { return GamesFolder() / Utf8Path(game.app_name); }
 
+std::string SetupPrefix(const Game& game) {
+#ifdef _WIN32
+  return std::string(game.repo) + "Setup";
+#else
+  return std::string(game.repo) + "-linux-x86_64";
+#endif
+}
+
+const char* SetupExtension() {
+#ifdef _WIN32
+  return ".exe";
+#else
+  return ".tar.gz";
+#endif
+}
+
 std::string SetupVersion(const Game& game, const fs::path& setup) {
-  const std::string name = setup.stem().string();
-  const std::string prefix = std::string(game.repo) + "Setup-";
-  return name.starts_with(prefix) ? name.substr(prefix.size()) : std::string();
+  const std::string name = setup.filename().string();
+  const std::string prefix = SetupPrefix(game) + "-";
+  const std::string extension = SetupExtension();
+  if (!name.starts_with(prefix) || !name.ends_with(extension) || name.size() <= prefix.size() + extension.size()) {
+    return {};
+  }
+  return name.substr(prefix.size(), name.size() - prefix.size() - extension.size());
 }
 
 bool VersionLess(const std::string& a, const std::string& b) {
@@ -478,6 +538,7 @@ bool VersionLess(const std::string& a, const std::string& b) {
   return pa && compare(split(a.substr(da + 1), '.'), split(b.substr(db + 1), '.')) < 0;
 }
 
+#ifdef _WIN32
 std::string InstalledVersion(const Game& game, const fs::path& exe) {
   const std::wstring key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" +
                            Utf8Path(game.app_id).wstring() + L"_is1";
@@ -498,6 +559,16 @@ std::string InstalledVersion(const Game& game, const fs::path& exe) {
   }
   return {};
 }
+#else
+std::string InstalledVersion(const Game& game, const fs::path& exe) {
+  const auto record = ReadIni(InstallRecord(game));
+  const auto location = record.find("location"), version = record.find("version");
+  if (location == record.end() || version == record.end()) return {};
+  std::error_code ec;
+  if (!fs::equivalent(Utf8Path(location->second) / game.exe, exe, ec)) return {};
+  return version->second;
+}
+#endif
 
 fs::path FindSetup(const Game& game, const fs::path& launcher_dir) {
   // The <Repo>Setup-*.exe of a folder with the highest version (then the newest).
@@ -506,11 +577,9 @@ fs::path FindSetup(const Game& game, const fs::path& launcher_dir) {
     std::string best_version;
     fs::file_time_type best_time{};
     std::error_code ec;
-    const std::string prefix = std::string(game.repo) + "Setup-";
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
-      const std::string name = entry.path().filename().string();
-      if (!name.starts_with(prefix) || entry.path().extension() != ".exe") continue;
       const std::string version = SetupVersion(game, entry.path());
+      if (version.empty()) continue;
       const auto t = entry.last_write_time(ec);
       if (best.empty() || VersionLess(best_version, version) ||
           (!VersionLess(version, best_version) && t > best_time)) {
@@ -532,14 +601,11 @@ fs::path FindSetup(const Game& game, const fs::path& launcher_dir) {
 
 namespace {
 
-fs::path SetupLog(size_t game) {
-  wchar_t temp[MAX_PATH] = L"";
-  GetTempPathW(MAX_PATH, temp);
-  return fs::path(temp) / "CoreOfLight" / (std::string(kGames[game].key) + "-setup.log");
-}
+fs::path SetupLog(size_t game) { return platform::TempDir() / (std::string(kGames[game].key) + "-setup.log"); }
 
 }  // namespace
 
+#ifdef _WIN32
 bool StartGameInstall(size_t game, const fs::path& setup, bool german, void** process, bool update,
                       const fs::path& dir) {
   if (game >= kGames.size() || setup.empty()) return false;
@@ -576,6 +642,45 @@ bool StartGameInstall(size_t game, const fs::path& setup, bool german, void** pr
   *process = info.hProcess;
   return true;
 }
+#endif
+
+#ifndef _WIN32
+// Off Windows a game's "setup" is its release's archive (<Repo>-linux-x86_64-<version>.tar.gz, the
+// game's files at its top), unpacked by tar into the game's folder; then the install record
+// (InstallRecord) says where it is and which version. A shell runs both, so the launcher waits for
+// one process as it does for a setup, and its output is the setup log. The game's settings file
+// stays as it is on an update (an archive doesn't bring one; --exclude in case one does). A new
+// install gets the settings a Windows setup writes (the screen's size, 2x or 1x, the software
+// portal) from the launcher once the game is found (launcher_ui.cpp, game_settings.h).
+bool StartGameInstall(size_t game, const fs::path& setup, bool german, void** process, bool update,
+                      const fs::path& dir) {
+  (void)german;
+  if (game >= kGames.size() || setup.empty()) return false;
+  const fs::path log = SetupLog(game);
+  std::error_code ec;
+  fs::create_directories(log.parent_path(), ec);
+  fs::remove(log, ec);
+  const fs::path target = update && !dir.empty() ? dir : InstallFolder(kGames[game]);
+  const fs::path record = InstallRecord(kGames[game]);
+  const std::string version = SetupVersion(kGames[game], setup);
+  auto utf8 = [](const fs::path& p) {
+    const std::u8string u8 = p.u8string();
+    return std::string(u8.begin(), u8.end());
+  };
+  // $1 the folder, $2 the archive, $3 the record, $4 the version, $5 the log.
+  const std::string script =
+      "exec >\"$5\" 2>&1\n"
+      "echo \"install: $2 -> $1\"\n"
+      "mkdir -p \"$1\" || exit 1\n"
+      "tar -xzf \"$2\" -C \"$1\" --exclude='*.toml' --no-same-owner || { echo 'ROM: the archive could not be unpacked'; exit 2; }\n"
+      "mkdir -p \"$(dirname \"$3\")\" && printf 'location = %s\\nversion = %s\\n' \"$1\" \"$4\" > \"$3\" || exit 3\n"
+      "echo 'install: done'\n";
+  *process = platform::StartProcess("/bin/sh", {"-c", script, "sh", utf8(target), utf8(setup), utf8(record), version,
+                                                utf8(log)},
+                                    setup.parent_path(), true);
+  return *process != nullptr;
+}
+#endif
 
 std::string GameInstallError(size_t game) {
   if (game >= kGames.size()) return {};
@@ -616,6 +721,7 @@ bool ExeMentions(const fs::path& exe, std::string_view text) {
 
 }  // namespace
 
+#ifdef _WIN32
 namespace {
 
 // A game built with the SDK's window_hidden (rexglue-sdk 1ac58ab) never shows its window for an
@@ -721,6 +827,59 @@ bool StartPictureExport(size_t game, const Found& found, void** process) {
   *process = info.hProcess;
   return true;
 }
+#endif
+
+#ifndef _WIN32
+namespace {
+
+// The SDK's settings are in its runtime library next to the game (or in the game itself, linked in).
+bool KnowsWindowHidden(const Found& found) {
+  for (const char* lib : {"librexruntime.so", "rexruntime.so"}) {
+    if (ExeMentions(found.exe.parent_path() / lib, "window_hidden")) return true;
+  }
+  return ExeMentions(found.exe, "window_hidden");
+}
+
+// An export run: the game without its window (where its build knows how; on Linux the launcher
+// can't hide another program's window), its output nowhere.
+bool StartHidden(const Found& found, std::vector<std::string> args, void** process) {
+  args.push_back("--started_by_launcher=true");
+  if (KnowsWindowHidden(found)) args.push_back("--window_hidden=true");
+  *process = platform::StartProcess(found.exe, args, found.workdir, true);
+  return *process != nullptr;
+}
+
+std::string Utf8Of(const fs::path& p) {
+  const std::u8string u8 = p.u8string();
+  return std::string(u8.begin(), u8.end());
+}
+
+}  // namespace
+
+bool StartTitleMusicExport(size_t game, const Found& found, void** process) {
+  if (found.exe.empty() || !ExeMentions(found.exe, "export_title_music")) return false;
+  const fs::path data = platform::TempDir() / "title_music" / Utf8Path(UserDataName(found.exe));
+  return StartHidden(found, {"--export_title_music=" + Utf8Of(TitleMusicFile(game)), "--user_data_root=" + Utf8Of(data)},
+                     process);
+}
+
+bool StartFigureCheck(const Found& found, const fs::path& list, void** process) {
+  if (found.exe.empty() || !ExeMentions(found.exe, "check_figures")) return false;
+  const fs::path data = platform::TempDir() / "figure_check";
+  return StartHidden(found, {"--check_figures=" + Utf8Of(list), "--user_data_root=" + Utf8Of(data), "--audio_mute=true"},
+                     process);
+}
+
+bool StartPictureExport(size_t game, const Found& found, void** process) {
+  if (found.exe.empty() || !ExeMentions(found.exe, "export_pictures")) return false;
+  const fs::path data = platform::TempDir() / "pictures" / Utf8Path(UserDataName(found.exe));
+  return StartHidden(found,
+                     {"--export_pictures=" + Utf8Of(PicturesDir(game)), "--user_data_root=" + Utf8Of(data),
+                      "--audio_mute=true", "--fullscreen=false", "--window_width=320", "--window_height=180",
+                      "--portal_mode=software"},
+                     process);
+}
+#endif
 
 fs::path MainFiguresDir() {
   return g_figures_dir.empty() ? SkylandersDir() / "Figures" : g_figures_dir;

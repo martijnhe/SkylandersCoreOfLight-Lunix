@@ -1,8 +1,10 @@
 #include "file_browser.h"
 #include "hints.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
+#endif
 
 #include <algorithm>
 #include <cfloat>
@@ -14,6 +16,8 @@
 #include "games.h"
 #include "imgui.h"
 #include "nxe_art.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -62,13 +66,7 @@ std::string Utf8(const fs::path& p) {
   return std::string(u8.begin(), u8.end());
 }
 
-fs::path Known(REFKNOWNFOLDERID id) {
-  PWSTR path = nullptr;
-  fs::path out;
-  if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &path))) out = path;
-  CoTaskMemFree(path);
-  return out;
-}
+fs::path Known(platform::UserFolder which) { return platform::GetUserFolder(which); }
 
 bool IsFile(const fs::path& p) {
   std::error_code ec;
@@ -107,7 +105,7 @@ void FileBrowser::ListSearch() {
     if (d.game < 0) continue;  // another disc or version: counted, not offered
     const Game& g = AllGames()[size_t(d.game)];
     const std::string name = std::string(german_ ? g.name_de : g.name_en) +
-                             (d.languages ? (german_ ? " (PS3-Disc, f\xC3\xBCr die Sprache)" : " (PS3 disc, for its languages)") : "");
+                             (d.languages ? (german_ ? " (PS3-Disc, f\xC3\xBCr die Sprache)" : NL(" (PS3 disc, for its languages)")) : "");
     entries_.push_back({Entry::Kind::kFound, name + "  \xC2\xB7  " + Utf8(d.iso), d.iso});
   }
 }
@@ -127,7 +125,7 @@ void FileBrowser::Open(const fs::path& folder) {
   searching_view_ = false;
   fs::path start = folder;
   if (start.empty()) start = last_folder_;
-  if (start.empty()) start = Known(folders_only_ ? FOLDERID_Documents : FOLDERID_Downloads);
+  if (start.empty()) start = Known(folders_only_ ? platform::UserFolder::kDocuments : platform::UserFolder::kDownloads);
   std::error_code ec;
   if (!start.empty() && !fs::is_directory(start, ec)) start = fs::path();  // gone: the drives and places
   List(start);
@@ -144,9 +142,10 @@ void FileBrowser::List(const fs::path& folder) {
     if (!folders_only_ && !for_backup_) {
       entries_.push_back({Entry::Kind::kSearch,
                           german_ ? "Discs suchen (Downloads, Desktop, Dokumente und die Laufwerke)"
-                                  : "Find my discs (Downloads, Desktop, Documents and the drives)",
+                                  : NL("Find my discs (Downloads, Desktop, Documents and the drives)"),
                           {}});
     }
+#ifdef _WIN32
     // Under Wine / Proton (SteamOS) the Linux home folder: WINEHOMEDIR is "\??\Z:\home\<user>".
     if (folders_only_) {
       wchar_t home[MAX_PATH] = L"";
@@ -157,46 +156,44 @@ void FileBrowser::List(const fs::path& folder) {
       std::error_code ec;
       if (!path.empty() && fs::is_directory(path, ec)) {
         entries_.push_back({Entry::Kind::kPlace, german_ ? "Linux: Pers\xC3\xB6nlicher Ordner  " + Utf8(fs::path(path))
-                                                         : "Linux: home folder  " + Utf8(fs::path(path)),
+                                                         : NL("Linux: home folder  ") + Utf8(fs::path(path)),
                             fs::path(path)});
       }
     }
-    const std::pair<REFKNOWNFOLDERID, const char*> places[] = {
-        {FOLDERID_Downloads, german_ ? "Downloads" : "Downloads"},
-        {FOLDERID_Desktop, german_ ? "Desktop" : "Desktop"},
-        {FOLDERID_Documents, german_ ? "Dokumente" : "Documents"},
+#else
+    if (const fs::path home = Known(platform::UserFolder::kHome); !home.empty()) {
+      entries_.push_back({Entry::Kind::kPlace, german_ ? "Pers\xC3\xB6nlicher Ordner" : NL("Home folder"), home});
+    }
+#endif
+    const std::pair<platform::UserFolder, const char*> places[] = {
+        {platform::UserFolder::kDownloads, german_ ? "Downloads" : NL("Downloads")},
+        {platform::UserFolder::kDesktop, german_ ? "Desktop" : NL("Desktop")},
+        {platform::UserFolder::kDocuments, german_ ? "Dokumente" : NL("Documents")},
     };
     for (const auto& [id, name] : places) {
       const fs::path p = Known(id);
       if (!p.empty()) entries_.push_back({Entry::Kind::kPlace, name, p});
     }
-    const DWORD drives = GetLogicalDrives();
-    for (int d = 0; d < 26; ++d) {
-      if (!(drives & (1u << d))) continue;
-      const std::wstring root = std::wstring(1, wchar_t(L'A' + d)) + L":\\";
-      wchar_t label[MAX_PATH] = L"";
-      GetVolumeInformationW(root.c_str(), label, MAX_PATH, nullptr, nullptr, nullptr, nullptr, 0);
-      std::string name = Utf8(fs::path(root));
-      if (label[0]) name += "  " + Utf8(fs::path(label));
-      entries_.push_back({Entry::Kind::kPlace, name, fs::path(root)});
+    for (const platform::Drive& drive : platform::Drives()) {
+      entries_.push_back({Entry::Kind::kPlace, drive.name, drive.root});
     }
     return;
   }
-  entries_.push_back({Entry::Kind::kUp, german_ ? ".. (eine Ebene h\xC3\xB6her)" : ".. (one level up)", {}});
+  entries_.push_back({Entry::Kind::kUp, german_ ? ".. (eine Ebene h\xC3\xB6her)" : NL(".. (one level up)"), {}});
   // Choosing the games folder: this one, as the second entry in every folder.
   if (folders_only_) {
     entries_.push_back({Entry::Kind::kThisFolder,
                         for_figures_ ? (german_ ? "Diesen Ordner pr\xC3\xBC" "fen und importieren"
-                                                : "Check and import this folder")
+                                                : NL("Check and import this folder"))
                         : for_data_  ? (german_ ? "Hier den Ordner Skylanders f\xC3\xBCr die Spieldaten nehmen"
-                                                : "Put the Skylanders data folder here")
-                                     : (german_ ? "Diesen Ordner f\xC3\xBCr die Spiele nehmen" : "Use this folder for the games"),
+                                                : NL("Put the Skylanders data folder here"))
+                                     : (german_ ? "Diesen Ordner f\xC3\xBCr die Spiele nehmen" : NL("Use this folder for the games")),
                         folder});
   }
   // A folder with an unpacked disc can be taken as it is.
   if (!folders_only_ && !for_backup_ && IsFile(folder / "default.xex")) {
     entries_.push_back({Entry::Kind::kThisFolder,
-                        german_ ? "Diesen Ordner einlesen (entpackte Disc)" : "Take this folder (an unpacked disc)",
+                        german_ ? "Diesen Ordner einlesen (entpackte Disc)" : NL("Take this folder (an unpacked disc)"),
                         folder});
   }
   std::vector<std::pair<std::wstring, fs::path>> folders, isos;
@@ -209,8 +206,12 @@ void FileBrowser::List(const fs::path& folder) {
     const std::wstring name = p.filename().wstring();
     if (name.empty() || name[0] == L'$') continue;  // the system's own folders
     if (it->is_directory(type_ec)) {
+#ifdef _WIN32
       DWORD attributes = GetFileAttributesW(p.c_str());
       if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_HIDDEN)) continue;
+#else
+      if (name[0] == L'.') continue;  // hidden off Windows
+#endif
       folders.emplace_back(name, p);
     } else {
       std::wstring ext = p.extension().wstring();
@@ -275,25 +276,25 @@ void FileBrowser::Draw(float width, float height) {
   DrawBackdrop(dl, width, height, {}, true);
   if (folders_only_) {
     Text(dl, bold_, 22 * u, {48 * u, 34 * u}, kDim,
-         for_figures_ ? (german_ ? "IMAGINATORS-FIGUREN" : "IMAGINATORS FIGURES")
-         : for_data_  ? (german_ ? "SPIELDATEN-ORDNER" : "DATA FOLDER")
-                      : (german_ ? "SPIELE-ORDNER" : "GAMES FOLDER"));
+         for_figures_ ? (german_ ? "IMAGINATORS-FIGUREN" : NL("IMAGINATORS FIGURES"))
+         : for_data_  ? (german_ ? "SPIELDATEN-ORDNER" : NL("DATA FOLDER"))
+                      : (german_ ? "SPIELE-ORDNER" : NL("GAMES FOLDER")));
     Text(dl, bold_, 40 * u, {46 * u, 56 * u}, kGold,
-         for_figures_ ? (german_ ? "Welcher Ordner hat die Figurendateien?" : "Which folder has the figure files?")
-         : for_data_  ? (german_ ? "Wohin mit Spielst\xC3\xA4nden und Figuren?" : "Where should saves and figures go?")
-                      : (german_ ? "Wo liegen deine Spiele?" : "Where are your games?"));
+         for_figures_ ? (german_ ? "Welcher Ordner hat die Figurendateien?" : NL("Which folder has the figure files?"))
+         : for_data_  ? (german_ ? "Wohin mit Spielst\xC3\xA4nden und Figuren?" : NL("Where should saves and figures go?"))
+                      : (german_ ? "Wo liegen deine Spiele?" : NL("Where are your games?")));
   } else {
     Text(dl, bold_, 22 * u, {48 * u, 34 * u}, kDim,
-         for_backup_     ? (german_ ? "MEINE DATEN IMPORTIEREN" : "IMPORT MY DATA")
-         : for_language_ ? (german_ ? "IMAGINATORS-SPRACHE" : "IMAGINATORS LANGUAGE")
-                         : (german_ ? "DISC EINLESEN" : "ADD A DISC"));
+         for_backup_     ? (german_ ? "MEINE DATEN IMPORTIEREN" : NL("IMPORT MY DATA"))
+         : for_language_ ? (german_ ? "IMAGINATORS-SPRACHE" : NL("IMAGINATORS LANGUAGE"))
+                         : (german_ ? "DISC EINLESEN" : NL("ADD A DISC")));
     Text(dl, bold_, 40 * u, {46 * u, 56 * u}, kGold,
-         for_backup_     ? (german_ ? "W\xC3\xA4hle die Datei deines Exports" : "Choose the file you exported")
-         : for_language_ ? (german_ ? "W\xC3\xA4hle deine PS3-Disc von Imaginators" : "Choose your PS3 disc of Imaginators")
-                         : (german_ ? "W\xC3\xA4hle die ISO deiner Disc" : "Choose your disc's ISO"));
+         for_backup_     ? (german_ ? "W\xC3\xA4hle die Datei deines Exports" : NL("Choose the file you exported"))
+         : for_language_ ? (german_ ? "W\xC3\xA4hle deine PS3-Disc von Imaginators" : NL("Choose your PS3 disc of Imaginators"))
+                         : (german_ ? "W\xC3\xA4hle die ISO deiner Disc" : NL("Choose your disc's ISO")));
   }
   const float left = 48 * u, top = 128 * u;
-  std::string where = folder_.empty() ? (german_ ? "Dieser PC" : "This PC") : Utf8(folder_);
+  std::string where = folder_.empty() ? (german_ ? "Dieser PC" : NL("This PC")) : Utf8(folder_);
   if (searching_view_ && search_) {
     ListSearch();
     const int folders = search_->folders.load(), isos = search_->isos.load();
@@ -301,12 +302,12 @@ void FileBrowser::Draw(float width, float height) {
     char status[200];
     if (!search_->done) {
       std::snprintf(status, sizeof(status),
-                    german_ ? "Suche Discs ... %d Ordner, %d ISO-Dateien angesehen" : "Looking for discs ... %d folders, %d ISO files seen",
+                    german_ ? "Suche Discs ... %d Ordner, %d ISO-Dateien angesehen" : NL("Looking for discs ... %d folders, %d ISO files seen"),
                     folders, isos);
     } else {
       std::snprintf(status, sizeof(status),
                     german_ ? "Fertig: %d Skylanders-Disc(s) unter %d ISO-Dateien in %d Ordnern"
-                            : "Done: %d Skylanders disc(s) among %d ISO files in %d folders",
+                            : NL("Done: %d Skylanders disc(s) among %d ISO files in %d folders"),
                     discs, isos, folders);
     }
     where = status;
@@ -369,12 +370,12 @@ void FileBrowser::Draw(float width, float height) {
     Text(dl, regular_, 19 * u, {left, list_top + row_h * 0.4f}, kDim,
          search_ && search_->done
              ? (german_ ? "Keine Skylanders-Disc gefunden. B: selbst einen Ordner w\xC3\xA4hlen."
-                        : "No Skylanders disc found. B: choose a folder yourself.")
-             : (german_ ? "Einen Moment ..." : "One moment ..."));
+                        : NL("No Skylanders disc found. B: choose a folder yourself."))
+             : (german_ ? "Einen Moment ..." : NL("One moment ...")));
   } else if (n <= (folders_only_ ? 2 : 1) && !folder_.empty()) {
     Text(dl, regular_, 19 * u, {left, list_top + row_h * (folders_only_ ? 2.2f : 1.2f)}, kDim,
-         folders_only_ ? (german_ ? "Hier sind keine Ordner." : "No folders here.")
-                       : (german_ ? "Hier sind keine ISO-Dateien und keine Ordner." : "No ISO files and no folders here."));
+         folders_only_ ? (german_ ? "Hier sind keine Ordner." : NL("No folders here."))
+                       : (german_ ? "Hier sind keine ISO-Dateien und keine Ordner." : NL("No ISO files and no folders here.")));
   }
   if (n && (clicked >= 0 || once(ImGuiKey_Enter) || once(ImGuiKey_GamepadFaceDown))) {
     Choose(entries_[clicked >= 0 ? clicked : selected_]);
@@ -400,28 +401,28 @@ void FileBrowser::Draw(float width, float height) {
   float hx = left;
   const float hy = height - 52 * u;
   if (folders_only_) {
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x96" "ffnen / nehmen" : "Open / use");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Seite" : "Page");
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x96" "ffnen / nehmen" : NL("Open / use"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Seite" : NL("Page"));
     Text(dl, regular_, 18 * u, {hx, hy + 2 * u}, kDim,
          for_figures_ ? (german_ ? "Unterordner z\xC3\xA4hlen mit. Imaginators pr\xC3\xBC" "ft jede Datei selbst; nur echte kommen dazu."
-                                 : "Subfolders count too. Imaginators checks every file itself; only real ones come in.")
+                                 : NL("Subfolders count too. Imaginators checks every file itself; only real ones come in."))
          : for_data_ ? (german_ ? "Darin kommt ein Ordner Skylanders mit allem: Spielst\xC3\xA4nde, Figuren, Profile."
-                              : "A Skylanders folder goes in it with everything: saves, figures, profiles.")
+                              : NL("A Skylanders folder goes in it with everything: saves, figures, profiles."))
          : german_ ? "Spiele in diesem Ordner und seinen Unterordnern werden gefunden, mit ihrer Disc; neue kommen hierher."
-                   : "Games in this folder and its subfolders are found, with their disc; new ones go here.");
+                   : NL("Games in this folder and its subfolders are found, with their disc; new ones go here."));
   } else {
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x96" "ffnen / einlesen" : "Open / add");
-    if (!for_backup_) hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Discs suchen" : "Find my discs");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
-    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Seite" : "Page");
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "\xC3\x96" "ffnen / einlesen" : NL("Open / add"));
+    if (!for_backup_) hx = Hint(dl, bold_, 22 * u, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Discs suchen" : NL("Find my discs"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
+    hx = Hint(dl, bold_, 22 * u, {hx, hy}, "LB/RB", Rgba(80, 90, 140), german_ ? "Seite" : NL("Page"));
     Text(dl, regular_, 18 * u, {hx, hy + 2 * u}, kDim,
          for_backup_ ? (german_ ? "Die .zip aus \xE2\x80\x9EMeine Daten exportieren\xE2\x80\x9C. Was schon da ist, bleibt."
-                                : "The .zip from \"Export my data\". What's already here stays.")
+                                : NL("The .zip from \"Export my data\". What's already here stays."))
          : for_language_ ? (german_ ? "Eine entschl\xC3\xBCsselte .iso oder ihr entpackter Ordner; sie selbst bleibt, wie sie ist."
-                                  : "A decrypted .iso or its unpacked folder; the disc itself stays as it is.")
+                                  : NL("A decrypted .iso or its unpacked folder; the disc itself stays as it is."))
          : german_ ? "Die ISO wird in den rom-Ordner des Spiels entpackt; sie selbst bleibt, wo sie ist."
-                   : "The ISO is unpacked into the game's rom folder; the file itself stays where it is.");
+                   : NL("The ISO is unpacked into the game's rom folder; the file itself stays where it is."));
   }
   ImGui::End();
 }

@@ -65,8 +65,8 @@ void AddPlaySeconds(const Profile& p, const std::string& game_key, uint64_t seco
 // stay. The number copied.
 int CopyFigures(const Profile& from, const Profile& to, bool as_new);
 
-// The command line the launcher adds for the active profile when it starts a game's exe: nothing
+// The arguments the launcher adds for the active profile when it starts a game's exe: none
 // for the main profile.
-std::wstring ProfileArguments(const std::filesystem::path& exe);
+std::vector<std::string> ProfileArguments(const std::filesystem::path& exe);
 
 }  // namespace coreoflight

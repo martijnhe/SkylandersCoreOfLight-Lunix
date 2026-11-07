@@ -1,9 +1,11 @@
 #include "launcher_ui.h"
 #include "hints.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -19,6 +21,8 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "nxe_art.h"
+#include "desktop_entries.h"
+#include "unlock_figures.h"
 #include "pad_state.h"
 #include "portal/data_folder.h"
 #include "portal/figure_catalog.h"
@@ -30,6 +34,8 @@
 #include "problem_report.h"
 #include "textures.h"
 #include "whats_new.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace sp = skylanders::portal;
 
@@ -47,19 +53,17 @@ const ImU32 kDim = Rgba(180, 190, 215);
 const ImU32 kAccents[] = {Rgba(80, 170, 70), Rgba(230, 130, 40), Rgba(150, 90, 220),
                           Rgba(40, 150, 220), Rgba(220, 60, 60), Rgba(240, 180, 40)};
 
+// UTF-8 and wide text through std::filesystem::path, which converts them the same way everywhere
+// (UTF-16 on Windows, UTF-32 on Linux).
 std::wstring Wide(const std::string& s) {
   if (s.empty()) return {};
-  const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), nullptr, 0);
-  std::wstring w(size_t(n), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), w.data(), n);
-  return w;
+  return std::filesystem::path(std::u8string(s.begin(), s.end())).wstring();
 }
 
 std::string Utf8(const std::wstring& w) {
   if (w.empty()) return {};
-  const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), nullptr, 0, nullptr, nullptr);
-  std::string out(size_t(n), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), out.data(), n, nullptr, nullptr);
+  const std::u8string u8 = std::filesystem::path(w).u8string();
+  std::string out(u8.begin(), u8.end());
   while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) out.pop_back();
   return out;
 }
@@ -154,6 +158,18 @@ void LauncherUi::Init(const std::filesystem::path& launcher_dir, ImFont* regular
 
 void LauncherUi::ApplyHubSettings() {
   german_ = HubGerman(hub_);
+  SetDutch(HubDutch(hub_));
+  // "Unlock all figures" (unlock_figures.h): the folder brought in line with the setting.
+  if (const std::filesystem::path dir = FiguresDir(); hub_.unlock_all_figures != FiguresUnlocked(dir)) {
+    const int n = hub_.unlock_all_figures ? UnlockAllFigures(dir) : RelockFigures(dir);
+    if (n > 0) {
+      figures_ = CountFigures();
+      ShowToast(hub_.unlock_all_figures
+                    ? (german_ ? std::to_string(n) + " Figuren freigeschaltet" : std::to_string(n) + NL(" figures unlocked"))
+                    : (german_ ? std::to_string(n) + " leere Figuren entfernt" : std::to_string(n) + NL(" blank figures removed")),
+                8.0);
+    }
+  }
   // Handheld mode (#39): bigger screens (hints.h UiScale), games set up at 1x.
   g_handheld_active = HandheldActive(hub_.handheld);
   g_ui_zoom = g_handheld_active ? kHandheldZoom : 1.0f;
@@ -184,6 +200,8 @@ void LauncherUi::Refresh() {
                                       : std::string());
   }
   update_put_off_.resize(AllGames().size(), false);
+  // The launcher and the games it installed in the desktop's menu (Linux, desktop_entries.h).
+  UpdateDesktopEntries(found_, installed_versions_, launcher_dir_, portable_);
   ApplyReleases();
   LoadProfiles(german_);
   figures_ = CountFigures();
@@ -269,15 +287,15 @@ void LauncherUi::UpdateImport() {
 // then asks for the disc ("Disc einlesen" on A). It copies about 100 MB, a few seconds.
 void LauncherUi::UpdateInstall() {
   if (!install_process_) return;
-  const DWORD wait = WaitForSingleObject(install_process_, 0);
-  if (wait != WAIT_OBJECT_0 && ImGui::GetTime() - install_since_ < 300.0) return;
-  DWORD code = 3;
-  if (wait == WAIT_OBJECT_0) {
-    GetExitCodeProcess(install_process_, &code);
+  const bool ended = platform::WaitProcess(install_process_, 0);
+  if (!ended && ImGui::GetTime() - install_since_ < 300.0) return;
+  uint32_t code = 3;
+  if (ended) {
+    code = platform::ProcessExitCode(install_process_);
   } else {
-    TerminateProcess(install_process_, 3);
+    platform::KillProcess(install_process_, 3);
   }
-  CloseHandle(install_process_);
+  platform::CloseProcess(install_process_);
   install_process_ = nullptr;
   const size_t game = install_game_;
   Refresh();
@@ -289,9 +307,9 @@ void LauncherUi::UpdateInstall() {
     HubLog("install: " + std::string(AllGames()[game].name_en) + (update ? " updated to " : " installed, ") +
            (version.empty() ? std::string("version unknown") : version));
     if (update) {
-      error_ = Wide(name + (german_ ? " ist aktualisiert (" : " is updated (") + version + ")");
+      error_ = Wide(name + (german_ ? " ist aktualisiert (" : NL(" is updated (")) + version + ")");
     } else {
-      error_ = Wide(name + (german_ ? " ist installiert. A: die Disc einlesen" : " is installed. A: add the disc"));
+      error_ = Wide(name + (german_ ? " ist installiert. A: die Disc einlesen" : NL(" is installed. A: add the disc")));
     }
   } else {
     if (update_total_ && update) update_failed_.push_back(name);  // "Alle aktualisieren" sums it up
@@ -299,7 +317,7 @@ void LauncherUi::UpdateInstall() {
     HubWarn("install: " + std::string(AllGames()[game].name_en) + (update ? " update" : " install") +
             " stopped, code " + std::to_string(code) + (why.empty() ? std::string() : ": " + why));
     char text[256];
-    std::snprintf(text, sizeof(text), german_ ? "%s: Installation abgebrochen (Code %lu)%s%s" : "%s: installation stopped (code %lu)%s%s",
+    std::snprintf(text, sizeof(text), german_ ? "%s: Installation abgebrochen (Code %lu)%s%s" : NL("%s: installation stopped (code %lu)%s%s"),
                   name.c_str(), code, why.empty() ? "" : ": ", why.c_str());
     error_ = Wide(text);
   }
@@ -398,14 +416,14 @@ bool LauncherUi::DrawCrashReport(float width, float height) {
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
   const std::string name = index < AllGames().size()
                                ? std::string(german_ ? AllGames()[index].name_de : AllGames()[index].name_en)
-                               : std::string(german_ ? "Das Spiel" : "The game");
-  const std::string title = name + (german_ ? " wurde unerwartet beendet" : " ended unexpectedly");
+                               : std::string(german_ ? "Das Spiel" : NL("The game"));
+  const std::string title = name + (german_ ? " wurde unerwartet beendet" : NL(" ended unexpectedly"));
   Text(dl, bold_, 30 * u, {(width - TextWidth(bold_, 30 * u, title.c_str())) * 0.5f, a.y + 30 * u}, kGold, title.c_str());
   char code[48];
-  std::snprintf(code, sizeof(code), german_ ? "Fehlercode 0x%08lX" : "Error code 0x%08lX", crash_code_);
+  std::snprintf(code, sizeof(code), german_ ? "Fehlercode 0x%08lX" : NL("Error code 0x%08lX"), crash_code_);
   Text(dl, regular_, 20 * u, {(width - TextWidth(regular_, 20 * u, code)) * 0.5f, a.y + 80 * u}, kDim, code);
   const char* line = german_ ? "Problem melden legt die Logs als Textdatei auf den Desktop, ohne deinen Benutzernamen."
-                             : "Report a problem puts the logs on the desktop as a text file, without your user name.";
+                             : NL("Report a problem puts the logs on the desktop as a text file, without your user name.");
   Text(dl, regular_, 19 * u, {(width - TextWidth(regular_, 19 * u, line)) * 0.5f, a.y + 118 * u}, kWhite, line);
   const ImGuiIO& io = ImGui::GetIO();
   auto button = [&](float x, const char* pad, ImU32 col, const char* label) {
@@ -416,8 +434,8 @@ bool LauncherUi::DrawCrashReport(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (270 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool yes = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Problem melden" : "Report it");
-  const bool no = button(b.x - 320 * u, "B", Rgba(200, 60, 60), german_ ? "Schlie\xC3\x9F" "en" : "Close");
+  const bool yes = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Problem melden" : NL("Report it"));
+  const bool no = button(b.x - 320 * u, "B", Rgba(200, 60, 60), german_ ? "Schlie\xC3\x9F" "en" : NL("Close"));
   ImGui::End();
   if (yes || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     crash_code_ = 0;
@@ -426,9 +444,8 @@ bool LauncherUi::DrawCrashReport(float width, float height) {
     if (report.empty()) {
       error_ = Wide(error);
     } else {
-      error_ = (german_ ? L"Auf dem Desktop: " : L"On the desktop: ") + report.filename().wstring();
-      const std::wstring select = L"/select,\"" + report.wstring() + L"\"";
-      ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+      error_ = (german_ ? L"Auf dem Desktop: " : NLW(L"On the desktop: ")) + report.filename().wstring();
+      platform::ShowInFolder(report);
     }
     error_until_ = ImGui::GetTime() + 8.0;
   } else if (no || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -445,7 +462,7 @@ void LauncherUi::ToggleFullscreen() {
 
 void LauncherUi::GameEnded() {
   if (running_key_.empty()) return;
-  AddPlaySeconds(running_profile_, running_key_, (GetTickCount64() - running_since_) / 1000);
+  AddPlaySeconds(running_profile_, running_key_, (platform::TickMs() - running_since_) / 1000);
   // And the saves as the session left them.
   if (hub_.auto_backup && running_game_ < found_.size()) {
     AutoBackup(running_profile_, AllGames()[running_game_], found_[running_game_].exe);
@@ -456,7 +473,7 @@ void LauncherUi::GameEnded() {
 
 void LauncherUi::GameRunning() {
   if (running_key_.empty() || !hub_.auto_backup || running_game_ >= found_.size()) return;
-  const uint64_t now = GetTickCount64();
+  const uint64_t now = platform::TickMs();
   if (now - last_auto_backup_ < 60ull * 60 * 1000) return;
   last_auto_backup_ = now;
   AutoBackup(running_profile_, AllGames()[running_game_], found_[running_game_].exe);
@@ -482,7 +499,7 @@ void LauncherUi::Start(size_t index) {
   // A does what the card needs: a game without its disc opens the disc browser, one that isn't
   // installed or has another disc version says so (nothing could run).
   auto say = [&](const wchar_t* de, const wchar_t* en) {
-    error_ = german_ ? de : en;
+    error_ = german_ ? de : NLW(en);
     error_until_ = ImGui::GetTime() + 6.0;
   };
   if (found_[index].exe.empty()) {
@@ -544,11 +561,11 @@ void LauncherUi::Start(size_t index) {
     starting_since_ = ImGui::GetTime();
     running_key_ = AllGames()[index].key;
     running_profile_ = ActiveProfile();
-    running_since_ = GetTickCount64();
+    running_since_ = platform::TickMs();
     running_game_ = index;
     last_auto_backup_ = running_since_;
   } else {
-    error_ = (german_ ? L"Konnte nicht starten: " : L"Could not start: ") + error;
+    error_ = (german_ ? L"Konnte nicht starten: " : NLW(L"Could not start: ")) + error;
     error_until_ = ImGui::GetTime() + 6.0;
   }
 }
@@ -646,30 +663,30 @@ void LauncherUi::DrawCard(size_t index, float x, float y, float w, float h, bool
     std::string achievements_line;
     if (index < achievements_.size() && achievements_[index].known) {
       char text[64];
-      std::snprintf(text, sizeof(text), german_ ? "Erfolge %d / %zu" : "Achievements %d / %zu",
+      std::snprintf(text, sizeof(text), german_ ? "Erfolge %d / %zu" : NL("Achievements %d / %zu"),
                     achievements_[index].unlocked, achievements_[index].items.size());
       lines.insert(lines.begin(), text);
       if (achievements_[index].platinum) achievements_line = text;
     }
     // The active profile's time in it, as far as the launcher started it.
     if (index >= play_seconds_.size() || !play_seconds_[index]) {
-      lines.insert(lines.begin(), german_ ? "Noch nicht gespielt" : "Not played yet");
+      lines.insert(lines.begin(), german_ ? "Noch nicht gespielt" : NL("Not played yet"));
     } else {
       const uint64_t minutes = play_seconds_[index] / 60, hours = minutes / 60;
       char text[64];
       if (hours) {
-        std::snprintf(text, sizeof(text), german_ ? "Gespielt %llu Std. %llu Min." : "Played %llu h %llu min",
+        std::snprintf(text, sizeof(text), german_ ? "Gespielt %llu Std. %llu Min." : NL("Played %llu h %llu min"),
                       (unsigned long long)hours, (unsigned long long)(minutes % 60));
       } else if (minutes) {
-        std::snprintf(text, sizeof(text), german_ ? "Gespielt %llu Min." : "Played %llu min", (unsigned long long)minutes);
+        std::snprintf(text, sizeof(text), german_ ? "Gespielt %llu Min." : NL("Played %llu min"), (unsigned long long)minutes);
       } else {
-        std::snprintf(text, sizeof(text), german_ ? "Gespielt < 1 Min." : "Played < 1 min");
+        std::snprintf(text, sizeof(text), german_ ? "Gespielt < 1 Min." : NL("Played < 1 min"));
       }
       lines.insert(lines.begin(), text);
     }
     // A picture export running for it (#12): first, so it shows on every card.
     if (pictures_process_ && pictures_game_ == index) {
-      lines.insert(lines.begin(), german_ ? "Bilder werden vorbereitet ..." : "Getting its pictures ...");
+      lines.insert(lines.begin(), german_ ? "Bilder werden vorbereitet ..." : NL("Getting its pictures ..."));
     }
     // As many as fit between the hero's picture (or the name) and the disc's state at the bottom,
     // or the chosen card's play button (at h - 112).
@@ -694,35 +711,35 @@ void LauncherUi::DrawCard(size_t index, float x, float y, float w, float h, bool
   ImU32 state_col = kDim;
   const bool installing = install_process_ && install_game_ == index;
   static char downloading[64];
-  std::snprintf(downloading, sizeof(downloading), german_ ? "L\xC3\xA4" "dt herunter ... %d %%" : "Downloading ... %d %%",
+  std::snprintf(downloading, sizeof(downloading), german_ ? "L\xC3\xA4" "dt herunter ... %d %%" : NL("Downloading ... %d %%"),
                 int(DownloadProgress() * 100.0f));
   if (!installed) {
     state = DownloadingFor(index) ? downloading
-            : installing          ? (german_ ? "Wird installiert ..." : "Installing ...")
-                                  : (german_ ? "Nicht installiert" : "Not installed");
+            : installing          ? (german_ ? "Wird installiert ..." : NL("Installing ..."))
+                                  : (german_ ? "Nicht installiert" : NL("Not installed"));
   } else if (BeingUpdated(index)) {
     // Its update: downloading, its setup running, or waiting its turn ("Alle aktualisieren").
     state = DownloadingFor(index) ? downloading
-            : installing          ? (german_ ? "Wird aktualisiert ..." : "Updating ...")
-                                  : (german_ ? "Update wartet ..." : "Update waiting ...");
+            : installing          ? (german_ ? "Wird aktualisiert ..." : NL("Updating ..."))
+                                  : (german_ ? "Update wartet ..." : NL("Update waiting ..."));
     state_col = kGold;
   } else {
     switch (f.disc.load()) {
       case DiscState::kMatches:
-        state = UpdateAvailable(index) ? (german_ ? "Bereit  \xC2\xB7  Update verf\xC3\xBC" "gbar" : "Ready  \xC2\xB7  update available")
-                                       : (german_ ? "Bereit" : "Ready");
+        state = UpdateAvailable(index) ? (german_ ? "Bereit  \xC2\xB7  Update verf\xC3\xBC" "gbar" : NL("Ready  \xC2\xB7  update available"))
+                                       : (german_ ? "Bereit" : NL("Ready"));
         state_col = UpdateAvailable(index) ? kGold : Rgba(110, 220, 110);
         break;
       case DiscState::kOther:
-        state = german_ ? "Andere Disc-Version" : "Another disc version";
+        state = german_ ? "Andere Disc-Version" : NL("Another disc version");
         state_col = Rgba(240, 170, 60);
         break;
       case DiscState::kMissing:
-        state = german_ ? "Disc fehlt (rom\\default.xex)" : "Disc missing (rom\\default.xex)";
+        state = german_ ? "Disc fehlt (rom\\default.xex)" : NL("Disc missing (rom\\default.xex)");
         state_col = Rgba(240, 90, 90);
         break;
       default:
-        state = german_ ? "Disc wird gepr\xC3\xBC" "ft ..." : "Checking the disc ...";
+        state = german_ ? "Disc wird gepr\xC3\xBC" "ft ..." : NL("Checking the disc ...");
         break;
     }
   }
@@ -731,16 +748,16 @@ void LauncherUi::DrawCard(size_t index, float x, float y, float w, float h, bool
   // When the active profile last saved it.
   if (installed && index < last_saved_.size() && last_saved_[index]) {
     const std::string when =
-        (german_ ? "Zuletzt gespeichert " : "Last saved ") + FileTimeDate(last_saved_[index], german_);
+        (german_ ? "Zuletzt gespeichert " : NL("Last saved ")) + FileTimeDate(last_saved_[index], german_);
     Text(dl, regular_, 16 * s, {x + 18 * s, y + h - 38 * s}, kDim, when.c_str(), w - 36 * s);
   }
   const DiscState disc_state = f.disc.load();
   const bool can_install = !installed && !install_process_ && index < setups_.size() && !setups_[index].empty();
   if (selected && !BeingUpdated(index) &&
       (can_install || (installed && (disc_state == DiscState::kMatches || disc_state == DiscState::kMissing)))) {
-    const char* go = can_install                         ? (german_ ? "Installieren" : "Install")
-                     : disc_state == DiscState::kMissing ? (german_ ? "Disc einlesen" : "Add the disc")
-                                                         : (german_ ? "Starten" : "Play");
+    const char* go = can_install                         ? (german_ ? "Installieren" : NL("Install"))
+                     : disc_state == DiscState::kMissing ? (german_ ? "Disc einlesen" : NL("Add the disc"))
+                                                         : (german_ ? "Starten" : NL("Play"));
     const float go_size = 24 * s;
     const float gw = TextWidth(bold_, go_size, go) + 60 * s;
     const ImVec2 a{x + (w - gw) * 0.5f, y + h - 112 * s};
@@ -769,7 +786,7 @@ void LauncherUi::OpenHubSettings(int page) {
   for (const WhatsNewLine& line : kWhatsNew) news.emplace_back(line.en, line.de);
   hub_screen_.SetNote({"New in Core of Light " COREOFLIGHT_VERSION, "Neu in Core of Light " COREOFLIGHT_VERSION},
                       std::move(news));
-  hub_screen_.Open(german_ ? "Einstellungen des Hubs" : "Launcher settings", &hub_loader_, {}, page);
+  hub_screen_.Open(german_ ? "Einstellungen des Hubs" : NL("Launcher settings"), &hub_loader_, {}, page);
   for (int p = 0; p < 2; ++p) rumble_seen_[p].clear();
   language_label_pending_ = true;
 }
@@ -809,7 +826,7 @@ void LauncherUi::AskLanguage(const std::filesystem::path& source) {
   if (language_import_.running()) return;  // its note shows how far it is
   if (!ImaginatorsReady()) {
     ShowToast(german_ ? "Imaginators braucht zuerst seine Xbox-360-Disc, dann die PS3-Disc f\xC3\xBCr die Sprache."
-                      : "Imaginators needs its Xbox 360 disc first, then the PS3 disc for the language.",
+                      : NL("Imaginators needs its Xbox 360 disc first, then the PS3 disc for the language."),
               10.0);
     return;
   }
@@ -825,7 +842,7 @@ void LauncherUi::TakeLanguageDisc(const std::filesystem::path& chosen) {
   const bool for_language = std::exchange(browse_for_language_, false);
   browser_.SetForLanguage(false);
   if (!IsImaginatorsPs3Disc(chosen)) {
-    ShowToast(german_ ? "Das ist keine PS3-Disc von Imaginators." : "That isn't a PS3 disc of Imaginators.", 8.0);
+    ShowToast(german_ ? "Das ist keine PS3-Disc von Imaginators." : NL("That isn't a PS3 disc of Imaginators."), 8.0);
     return;
   }
   if (for_language && !language_wanted_.empty() && ImaginatorsReady() && !language_import_.running()) {
@@ -857,17 +874,17 @@ bool LauncherUi::DrawLanguage(float width, float height) {
   const ImVec2 a{(width - bw) * 0.5f, (height - bh) * 0.5f}, b{a.x + bw, a.y + bh};
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
-  const char* title = german_ ? "Imaginators: Sprache" : "Imaginators: language";
+  const char* title = german_ ? "Imaginators: Sprache" : NL("Imaginators: language");
   Text(dl, bold_, 32 * u, {(width - TextWidth(bold_, 32 * u, title)) * 0.5f, a.y + 26 * u}, kGold, title);
   const char* line = language_source_.empty()
                          ? (german_ ? "Welche Sprache soll Imaginators sprechen? Danach w\xC3\xA4hlst du deine PS3-Disc "
                                       "des Spiels (.iso oder entpackter Ordner)."
-                                    : "Which language should Imaginators speak? Then you pick your PS3 disc of the "
-                                      "game (.iso or unpacked folder).")
+                                    : NL("Which language should Imaginators speak? Then you pick your PS3 disc of the "
+                                      "game (.iso or unpacked folder)."))
                          : (german_ ? "Deine PS3-Disc von Imaginators hat Texte, Stimmen und Filme in mehr Sprachen. "
                                       "Welche soll Imaginators sprechen?"
-                                    : "Your PS3 disc of Imaginators has texts, voices and movies in more languages. "
-                                      "Which one should Imaginators speak?");
+                                    : NL("Your PS3 disc of Imaginators has texts, voices and movies in more languages. "
+                                      "Which one should Imaginators speak?"));
   Text(dl, regular_, 21 * u, {a.x + 40 * u, a.y + 78 * u}, kWhite, line, bw - 80 * u);
   const ImGuiIO& io = ImGui::GetIO();
   int clicked = -1;
@@ -880,22 +897,22 @@ bool LauncherUi::DrawLanguage(float width, float height) {
     dl->AddRectFilled(p, q, chosen ? Rgba(70, 80, 150, 245) : Rgba(30, 40, 90, 240), 14 * u);
     if (chosen) dl->AddRect(p, q, kGold, 14 * u, 0, 2 * u);
     const std::string label =
-        own ? (german_ ? "Espa\xC3\xB1ol / Italiano (wie die Disc)" : "Espa\xC3\xB1ol / Italiano (the disc's own)")
+        own ? (german_ ? "Espa\xC3\xB1ol / Italiano (wie die Disc)" : NL("Espa\xC3\xB1ol / Italiano (the disc's own)"))
             : std::string(languages[r].own);
     Text(dl, bold_, 24 * u, {p.x + 24 * u, p.y + 9 * u}, kWhite, label.c_str());
     if (!own && language_now_ == languages[r].code) {
-      const char* now = german_ ? "jetzt" : "now";
+      const char* now = german_ ? "jetzt" : NL("now");
       Text(dl, regular_, 20 * u, {q.x - 24 * u - TextWidth(regular_, 20 * u, now), p.y + 12 * u}, kGold, now);
     }
     if (over && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) clicked = r;
   }
   const char* note = german_ ? "Etwa eine Minute. Spielst\xC3\xA4nde bleiben; zur\xC3\xBC" "ck geht es jederzeit unter "
                                "Einstellungen des Hubs > Imaginators-Sprache."
-                             : "About a minute. Your saves stay; you can go back any time in Launcher settings > "
-                               "Imaginators language.";
+                             : NL("About a minute. Your saves stay; you can go back any time in Launcher settings > "
+                               "Imaginators language.");
   Text(dl, regular_, 18 * u, {a.x + 40 * u, b.y - 74 * u}, kDim, note, bw - 80 * u);
-  ButtonHint(dl, bold_, 22 * u, {a.x + 40 * u, b.y - 42 * u}, "A", Rgba(70, 170, 70), german_ ? "W\xC3\xA4hlen" : "Choose");
-  ButtonHint(dl, bold_, 22 * u, {a.x + 250 * u, b.y - 42 * u}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+  ButtonHint(dl, bold_, 22 * u, {a.x + 40 * u, b.y - 42 * u}, "A", Rgba(70, 170, 70), german_ ? "W\xC3\xA4hlen" : NL("Choose"));
+  ButtonHint(dl, bold_, 22 * u, {a.x + 250 * u, b.y - 42 * u}, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
   ImGui::End();
   if (ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp) || ImGui::IsKeyPressed(ImGuiKey_GamepadLStickUp) ||
       ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
@@ -923,7 +940,7 @@ bool LauncherUi::DrawLanguage(float width, float height) {
   const std::string code = languages[language_row_].code;
   if (code == language_now_) {
     ShowToast(german_ ? std::string("Imaginators spricht schon ") + languages[language_row_].name_de + "."
-                      : std::string("Imaginators speaks ") + languages[language_row_].name_en + " already.");
+                      : std::string(NL("Imaginators speaks ")) + languages[language_row_].name_en + NL(" already."));
     return true;
   }
   if (!language_source_.empty()) {
@@ -942,7 +959,7 @@ bool LauncherUi::DrawProfileBadge(float width, float u) {
   const ImGuiIO& io = ImGui::GetIO();
   const Profile& p = ActiveProfile();
   const float radius = 30 * u;
-  const std::string label = german_ ? "Profil" : "Profile";
+  const std::string label = german_ ? "Profil" : NL("Profile");
   const float name_w = std::max(TextWidth(bold_, 24 * u, p.name.c_str()), TextWidth(regular_, 17 * u, label.c_str()));
   const float right = width - 48 * u;
   const ImVec2 c{right - radius, 70 * u};
@@ -1005,9 +1022,9 @@ bool LauncherUi::DrawProfileBadge(float width, float u) {
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) pad_clicked_ = true;
   };
   float px = left - 26 * u;
-  for (int pad = XUSER_MAX_COUNT - 1; pad >= 0; --pad) {
+  for (int pad = kPadSlots - 1; pad >= 0; --pad) {
     if (!g_pad_connected[pad]) continue;
-    const int level = PadBattery(DWORD(pad));
+    const int level = PadBattery(pad);
     const float w = (level >= 0 ? 52 : 32) * u, h = 30 * u;
     const ImVec2 a{px - w, c.y - h * 0.5f}, b{px, c.y + h * 0.5f};
     pad_hover(a, b);
@@ -1074,13 +1091,13 @@ bool LauncherUi::DrawProfileBadge(float width, float u) {
                                    ? (german_ ? AllGames()[selected_].name_de : AllGames()[selected_].name_en)
                                    : std::string();
       std::string text = portal == UsbPortalKind::kXbox360
-                             ? (german_ ? "Xbox-360-Portal am USB (noch nicht getestet). " : "Xbox 360 portal on USB (not tested yet). ")
-                             : (german_ ? "Echtes Portal am USB (PS3 / Wii / Wii U). " : "Real portal on USB (PS3 / Wii / Wii U). ");
+                             ? (german_ ? "Xbox-360-Portal am USB (noch nicht getestet). " : NL("Xbox 360 portal on USB (not tested yet). "))
+                             : (german_ ? "Echtes Portal am USB (PS3 / Wii / Wii U). " : NL("Real portal on USB (PS3 / Wii / Wii U). "));
       if (used) {
-        text += german_ ? game + " benutzt es." : game + " uses it.";
+        text += german_ ? game + " benutzt es." : game + NL(" uses it.");
       } else {
         text += german_ ? game + " spielt mit dem virtuellen Portal. Zum Benutzen: Einstellungen des Spiels (Y / Tab) > Portal > \"Beides\" oder \"Nur echtes USB-Portal\"."
-                        : game + " plays with the virtual portal. To use it: the game's settings (Y / Tab) > Portal > \"Both\" or \"Real USB portal only\".";
+                        : game + NL(" plays with the virtual portal. To use it: the game's settings (Y / Tab) > Portal > \"Both\" or \"Real USB portal only\".");
       }
       ShowToast(text, 10.0);
     }
@@ -1122,7 +1139,7 @@ bool LauncherUi::Draw(float width, float height) {
   const bool keep = DrawScreens(width, height);
   // What the figure import brought in (#34), over whatever screen is open.
   if (const std::string summary = figure_import_.TakeSummary(); !summary.empty()) {
-    ShowToast((german_ ? "Imaginators-Figuren: " : "Imaginators figures: ") + summary, 12.0);
+    ShowToast((german_ ? "Imaginators-Figuren: " : NL("Imaginators figures: ")) + summary, 12.0);
   }
   if (const std::string summary = language_import_.TakeSummary(); !summary.empty()) {
     ShowToast(summary, 14.0);
@@ -1133,8 +1150,7 @@ bool LauncherUi::Draw(float width, float height) {
   if (const std::string summary = data_transfer_.TakeSummary(); !summary.empty()) {
     ShowToast(summary, 16.0);
     if (const std::filesystem::path file = data_transfer_.TakeExported(); !file.empty()) {
-      const std::wstring select = L"/select,\"" + file.wstring() + L"\"";
-      ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+      platform::ShowInFolder(file);
     } else {
       hub_ = LoadHubSettings();
       ApplyHubSettings();
@@ -1197,10 +1213,10 @@ bool LauncherUi::Draw(float width, float height) {
 void LauncherUi::UpdatePictureExport() {
   if (pictures_tried_.size() != found_.size()) pictures_tried_.assign(found_.size(), false);
   if (pictures_process_) {
-    const DWORD wait = WaitForSingleObject(pictures_process_, 0);
-    if (wait != WAIT_OBJECT_0 && ImGui::GetTime() - pictures_since_ < 200.0) return;
-    if (wait != WAIT_OBJECT_0) TerminateProcess(pictures_process_, 3);
-    CloseHandle(pictures_process_);
+    const bool ended = platform::WaitProcess(pictures_process_, 0);
+    if (!ended && ImGui::GetTime() - pictures_since_ < 200.0) return;
+    if (!ended) platform::KillProcess(pictures_process_, 3);
+    platform::CloseProcess(pictures_process_);
     pictures_process_ = nullptr;
     hero_checked_ = -100.0;  // the cards' hero pictures looked for again
     CountAchievements();
@@ -1228,10 +1244,10 @@ void LauncherUi::UpdatePictureExport() {
 void LauncherUi::UpdateTitleMusicExport() {
   if (export_tried_.size() != found_.size()) export_tried_.assign(found_.size(), false);
   if (export_process_) {
-    const DWORD wait = WaitForSingleObject(export_process_, 0);
-    if (wait != WAIT_OBJECT_0 && ImGui::GetTime() - export_since_ < 30.0) return;
-    if (wait != WAIT_OBJECT_0) TerminateProcess(export_process_, 3);
-    CloseHandle(export_process_);
+    const bool ended = platform::WaitProcess(export_process_, 0);
+    if (!ended && ImGui::GetTime() - export_since_ < 30.0) return;
+    if (!ended) platform::KillProcess(export_process_, 3);
+    platform::CloseProcess(export_process_);
     export_process_ = nullptr;
   }
   if (!hub_.title_music || selected_ >= found_.size() || export_tried_[selected_]) return;
@@ -1262,7 +1278,7 @@ bool LauncherUi::DrawStarting(float width, float height) {
   DrawBackdrop(dl, width, height,
                starting_game_ < background_art_.size() ? background_art_[starting_game_] : std::filesystem::path());
   const Game& game = AllGames()[std::min(starting_game_, AllGames().size() - 1)];
-  const std::string title = german_ ? std::string(game.name_de) + " startet ..." : std::string(game.name_en) + " is starting ...";
+  const std::string title = german_ ? std::string(game.name_de) + " startet ..." : std::string(game.name_en) + NL(" is starting ...");
   Text(dl, bold_, 44 * u, {(width - TextWidth(bold_, 44 * u, title.c_str())) * 0.5f, height * 0.42f}, kGold,
        title.c_str());
   // A ring of dots turning, so it doesn't look stuck.
@@ -1294,7 +1310,7 @@ bool LauncherUi::DrawQuitConfirm(float width, float height) {
   const ImVec2 a{(width - bw) * 0.5f, (height - bh) * 0.5f}, b{a.x + bw, a.y + bh};
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
-  const char* title = german_ ? "Core of Light beenden?" : "Quit Core of Light?";
+  const char* title = german_ ? "Core of Light beenden?" : NL("Quit Core of Light?");
   Text(dl, bold_, 34 * u, {(width - TextWidth(bold_, 34 * u, title)) * 0.5f, a.y + 40 * u}, kGold, title);
   // The two answers as buttons with their pad button.
   const ImGuiIO& io = ImGui::GetIO();
@@ -1306,8 +1322,8 @@ bool LauncherUi::DrawQuitConfirm(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (220 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool yes = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Beenden" : "Quit");
-  const bool no = button(b.x - 270 * u, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : "Back");
+  const bool yes = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Beenden" : NL("Quit"));
+  const bool no = button(b.x - 270 * u, "B", Rgba(200, 60, 60), german_ ? "Zur\xC3\xBC" "ck" : NL("Back"));
   ImGui::End();
   if (yes || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     return false;
@@ -1332,16 +1348,16 @@ bool LauncherUi::DrawImportQuestion(float width, float height) {
   const ImVec2 a{(width - bw) * 0.5f, (height - bh) * 0.5f}, b{a.x + bw, a.y + bh};
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
-  const char* title = german_ ? "Einstellungen ersetzen?" : "Replace the settings?";
+  const char* title = german_ ? "Einstellungen ersetzen?" : NL("Replace the settings?");
   Text(dl, bold_, 34 * u, {(width - TextWidth(bold_, 34 * u, title)) * 0.5f, a.y + 30 * u}, kGold, title);
   std::string games;
   for (const std::string& g : data_transfer_.settings_differ()) games += (games.empty() ? "" : ", ") + g;
   const std::string text =
-      (german_ ? "Schon mit eigenen Einstellungen auf diesem PC: " : "Already with settings of their own on this PC: ") + games +
+      (german_ ? "Schon mit eigenen Einstellungen auf diesem PC: " : NL("Already with settings of their own on this PC: ")) + games +
       (german_ ? ". Durch die aus der Datei ersetzen? Die jetzigen bleiben als Kopie daneben. Alles andere kommt so "
                  "oder so dazu, ohne etwas zu \xC3\xBC" "berschreiben."
-               : ". Replace them with the ones from the file? The ones there now stay as a copy beside them. "
-                 "Everything else comes in either way, without overwriting anything.");
+               : NL(". Replace them with the ones from the file? The ones there now stay as a copy beside them. "
+                 "Everything else comes in either way, without overwriting anything."));
   dl->AddText(regular_, 20 * u, {a.x + 36 * u, a.y + 88 * u}, kWhite, text.c_str(), nullptr, bw - 72 * u);
   const ImGuiIO& io = ImGui::GetIO();
   auto button = [&](float x, const char* pad, ImU32 col, const char* label) {
@@ -1352,8 +1368,8 @@ bool LauncherUi::DrawImportQuestion(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (280 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool replace = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Ersetzen" : "Replace");
-  const bool keep = button(b.x - 330 * u, "B", Rgba(200, 60, 60), german_ ? "Meine behalten" : "Keep mine");
+  const bool replace = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Ersetzen" : NL("Replace"));
+  const bool keep = button(b.x - 330 * u, "B", Rgba(200, 60, 60), german_ ? "Meine behalten" : NL("Keep mine"));
   ImGui::End();
   if (replace || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     ask_import_settings_ = false;
@@ -1379,11 +1395,11 @@ bool LauncherUi::DrawReimportQuestion(float width, float height) {
   const ImVec2 a{(width - bw) * 0.5f, (height - bh) * 0.5f}, b{a.x + bw, a.y + bh};
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
-  const char* title = german_ ? "Spieldateien fehlen" : "Game files are missing";
+  const char* title = german_ ? "Spieldateien fehlen" : NL("Game files are missing");
   Text(dl, bold_, 34 * u, {(width - TextWidth(bold_, 34 * u, title)) * 0.5f, a.y + 30 * u}, kGold, title);
   const std::string text = ask_reimport_ +
                            (german_ ? ". Die Disc noch einmal einlesen? Spielst\xC3\xA4nde und Einstellungen bleiben."
-                                    : ". Take the disc again? Saves and settings stay.");
+                                    : NL(". Take the disc again? Saves and settings stay."));
   dl->AddText(regular_, 20 * u, {a.x + 36 * u, a.y + 88 * u}, kWhite, text.c_str(), nullptr, bw - 72 * u);
   const ImGuiIO& io = ImGui::GetIO();
   auto button = [&](float x, const char* pad, ImU32 col, const char* label) {
@@ -1394,8 +1410,8 @@ bool LauncherUi::DrawReimportQuestion(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (280 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool again = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Disc einlesen" : "Take the disc");
-  const bool later = button(b.x - 330 * u, "B", Rgba(200, 60, 60), german_ ? "Sp\xC3\xA4ter" : "Later");
+  const bool again = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Disc einlesen" : NL("Take the disc"));
+  const bool later = button(b.x - 330 * u, "B", Rgba(200, 60, 60), german_ ? "Sp\xC3\xA4ter" : NL("Later"));
   ImGui::End();
   if (again || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     // The disc browser (and its search) as from the start screen; the import sees the game's
@@ -1438,17 +1454,17 @@ bool LauncherUi::DrawUpdateConfirm(float width, float height) {
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
   const Game& game = AllGames()[index];
-  const std::string title = (german_ ? "Update f\xC3\xBCr " : "Update for ") + std::string(german_ ? game.name_de : game.name_en);
+  const std::string title = (german_ ? "Update f\xC3\xBCr " : NL("Update for ")) + std::string(german_ ? game.name_de : game.name_en);
   Text(dl, bold_, 32 * u, {(width - TextWidth(bold_, 32 * u, title.c_str())) * 0.5f, a.y + 30 * u}, kGold, title.c_str());
   const std::string installed = !installed_versions_[index].empty() ? installed_versions_[index]
-                                                                    : (german_ ? "unbekannt (kopiert)" : "unknown (copied)");
-  const std::string versions = (german_ ? "Installiert: " : "Installed: ") + installed +
-                               (german_ ? "   \xC2\xB7   Neu: " : "   \xC2\xB7   New: ") +
+                                                                    : (german_ ? "unbekannt (kopiert)" : NL("unknown (copied)"));
+  const std::string versions = (german_ ? "Installiert: " : NL("Installed: ")) + installed +
+                               (german_ ? "   \xC2\xB7   Neu: " : NL("   \xC2\xB7   New: ")) +
                                SetupVersion(game, setups_[index]);
   Text(dl, regular_, 21 * u, {(width - TextWidth(regular_, 21 * u, versions.c_str())) * 0.5f, a.y + 84 * u}, kWhite,
        versions.c_str());
   const char* keeps = german_ ? "Spielst\xC3\xA4nde, Figuren, Disc und Einstellungen bleiben."
-                              : "Saves, figures, the disc and the settings stay.";
+                              : NL("Saves, figures, the disc and the settings stay.");
   Text(dl, regular_, 18 * u, {(width - TextWidth(regular_, 18 * u, keeps)) * 0.5f, a.y + 118 * u}, kDim, keeps);
   const ImGuiIO& io = ImGui::GetIO();
   auto button = [&](float x, const char* pad, ImU32 col, const char* label) {
@@ -1459,13 +1475,13 @@ bool LauncherUi::DrawUpdateConfirm(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (260 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool yes = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Aktualisieren" : "Update");
-  const bool no = button(b.x - 310 * u, "B", Rgba(200, 60, 60), german_ ? "Erst spielen" : "Play first");
+  const bool yes = button(a.x + 50 * u, "A", Rgba(70, 170, 70), german_ ? "Aktualisieren" : NL("Update"));
+  const bool no = button(b.x - 310 * u, "B", Rgba(200, 60, 60), german_ ? "Erst spielen" : NL("Play first"));
   ImGui::End();
   if (yes || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     ask_update_ = -1;
     if (!BeginInstall(index, true)) {
-      error_ = german_ ? L"Der Installer lie\x00DF sich nicht starten" : L"Could not start the installer";
+      error_ = german_ ? L"Der Installer lie\x00DF sich nicht starten" : NLW(L"Could not start the installer");
       error_until_ = ImGui::GetTime() + 6.0;
     }
   } else if (no || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
@@ -1480,7 +1496,8 @@ bool LauncherUi::DrawUpdateConfirm(float width, float height) {
 
 namespace {
 
-// A release asset's file name as a path (the names are ASCII: <Repo>Setup-<version>.exe).
+// A release asset's file name as a path (the names are ASCII: <Repo>Setup-<version>.exe, on Linux
+// <Repo>-linux-x86_64-<version>.tar.gz).
 std::filesystem::path AssetPath(const std::string& name) { return std::filesystem::path(std::u8string(name.begin(), name.end())); }
 
 }  // namespace
@@ -1490,6 +1507,7 @@ struct LauncherUi::UpdateWork {
   std::atomic<bool> checking{false};
   bool fresh = false;              // a check ended (under `mutex`)
   std::vector<Release> releases;   // what it found (under `mutex`)
+  bool answered = false;           // GitHub answered at least once, with or without a match (`mutex`)
   std::atomic<int> download{0};    // 0 none, 1 running, 2 done, 3 failed
   std::atomic<float> progress{0.0f};
   std::atomic<bool> cancel{false};
@@ -1507,7 +1525,7 @@ void LauncherUi::RequestUpdateCheck(const std::string& why) {
 
 void LauncherUi::StartUpdateCheck(bool manual, const std::string& why) {
   if (Offline()) {
-    if (manual) ShowToast(german_ ? "Offline gestartet (--offline): keine Updates" : "Started offline (--offline): no updates");
+    if (manual) ShowToast(german_ ? "Offline gestartet (--offline): keine Updates" : NL("Started offline (--offline): no updates"));
     return;
   }
   if (manual) manual_check_ = true;
@@ -1518,19 +1536,28 @@ void LauncherUi::StartUpdateCheck(bool manual, const std::string& why) {
   struct Wanted {
     std::string repo, prefix, extension;
   };
+#ifdef _WIN32
   std::vector<Wanted> repos = {portable_ ? Wanted{"SkylandersCoreOfLight", kPortablePrefix, kPortableExtension}
                                          : Wanted{"SkylandersCoreOfLight", "CoreOfLightSetup", ".exe"}};
-  for (const Game& game : AllGames()) repos.push_back({game.repo, std::string(game.repo) + "Setup", ".exe"});
+#else
+  // Off Windows the launcher only comes as its ZIP (portable.h), unpacked where the player likes.
+  std::vector<Wanted> repos = {Wanted{"SkylandersCoreOfLight", kPortablePrefix, kPortableExtension}};
+#endif
+  for (const Game& game : AllGames()) repos.push_back({game.repo, SetupPrefix(game), SetupExtension()});
   std::thread([work = work_, repos] {
     std::vector<Release> found;
+    bool answered = false;
     for (const Wanted& w : repos) {
-      if (auto release = FetchLatestRelease(w.repo, w.prefix, w.extension)) found.push_back(*release);
+      bool this_answered = false;
+      if (auto release = FetchLatestRelease(w.repo, w.prefix, w.extension, &this_answered)) found.push_back(*release);
+      answered = answered || this_answered;
     }
     // Nothing at all: no network (or GitHub down); the releases known before stay.
     if (!found.empty()) SaveKnownReleases(found);
     {
       std::lock_guard lock(work->mutex);
       work->releases = std::move(found);
+      work->answered = answered;
       work->fresh = true;
     }
     work->checking = false;
@@ -1539,18 +1566,31 @@ void LauncherUi::StartUpdateCheck(bool manual, const std::string& why) {
 
 void LauncherUi::UpdateReleases() {
   std::vector<Release> found;
+  bool answered = false;
   {
     std::lock_guard lock(work_->mutex);
     if (!work_->fresh) return;
     work_->fresh = false;
     found = std::move(work_->releases);
+    answered = work_->answered;
   }
   const bool manual = std::exchange(manual_check_, false);
+  if (found.empty() && answered) {
+    // GitHub answered, but no release has a download for this system (on Linux: no Linux build
+    // released yet). A game's archive in the launcher's games folder still installs.
+    HubLog("updates: GitHub answered, no release has a download for this system yet");
+    if (manual) {
+      ShowToast(german_ ? "Noch keine Downloads f\xC3\xBCr dieses System: ein Spiel-Archiv im Ordner games neben dem Hub l\xC3\xA4sst sich installieren"
+                        : NL("No downloads for this system yet: a game's archive in the games folder next to the launcher installs"),
+                10.0);
+    }
+    return;
+  }
   if (found.empty()) {
     HubWarn("updates: no answer from GitHub (no network, or it is down or busy)");
     if (manual) {
       ShowToast(german_ ? "Keine Verbindung zu GitHub: Updates lassen sich gerade nicht pr\xC3\xBC" "fen"
-                        : "No connection to GitHub: updates can't be checked right now",
+                        : NL("No connection to GitHub: updates can't be checked right now"),
                 8.0);
     }
     return;
@@ -1584,12 +1624,12 @@ void LauncherUi::UpdateReleases() {
       games = games || (!found_[i].exe.empty() && UpdateAvailable(i) && !BeingUpdated(i));
     }
     if (hub_update_) {
-      ShowToast((german_ ? "Neue Version von Core of Light: " : "A new Core of Light: ") + hub_update_->version);
+      ShowToast((german_ ? "Neue Version von Core of Light: " : NL("A new Core of Light: ")) + hub_update_->version);
     } else if (games) {
       ask_updates_found_ = true;
     } else {
       ShowToast(german_ ? "Kein neues Update: alles ist auf dem neuesten Stand (Core of Light " COREOFLIGHT_VERSION ")"
-                        : "No new update: everything is up to date (Core of Light " COREOFLIGHT_VERSION ")");
+                        : std::string(NL("No new update: everything is up to date (Core of Light ")) + COREOFLIGHT_VERSION ")");
     }
   }
 }
@@ -1607,23 +1647,23 @@ void LauncherUi::DrawToast(float width, float height, bool start_screen) {
   float progress = -1.0f;  // a bar under the text when 0..1
   bool spinning = false;
   if (manual_check_ && work_->checking.load()) {
-    text = german_ ? "Suche nach Updates ..." : "Looking for updates ...";
+    text = german_ ? "Suche nach Updates ..." : NL("Looking for updates ...");
     spinning = true;
   } else if (update_total_ && !start_screen) {
     const size_t done = update_total_ - update_queue_.size();
     const size_t game = install_process_ ? install_game_ : work_->game;
     char line[200];
-    std::snprintf(line, sizeof(line), german_ ? "Aktualisiere %zu von %zu: %s" : "Updating %zu of %zu: %s", done,
+    std::snprintf(line, sizeof(line), german_ ? "Aktualisiere %zu von %zu: %s" : NL("Updating %zu of %zu: %s"), done,
                   update_total_, game < AllGames().size() ? (german_ ? AllGames()[game].name_de : AllGames()[game].name_en) : "");
     text = line;
     spinning = true;
     if (Downloading()) progress = DownloadProgress();
   } else if (figure_import_.running()) {
-    text = german_ ? "Imaginators pr\xC3\xBC" "ft die Figuren ..." : "Imaginators is checking the figures ...";
+    text = german_ ? "Imaginators pr\xC3\xBC" "ft die Figuren ..." : NL("Imaginators is checking the figures ...");
     spinning = true;
   } else if (language_import_.running()) {
     const std::string step = language_import_.step();
-    text = (german_ ? "Imaginators-Sprache: " : "Imaginators language: ") + (step.empty() ? std::string("...") : step);
+    text = (german_ ? "Imaginators-Sprache: " : NL("Imaginators language: ")) + (step.empty() ? std::string("...") : step);
     spinning = true;
     progress = language_import_.progress();
   } else if (!toast_.empty() && ImGui::GetTime() < toast_until_) {
@@ -1672,7 +1712,7 @@ bool LauncherUi::DrawUpdatesFound(float width, float height) {
   for (size_t i = 0; i < found_.size(); ++i) {
     if (found_[i].exe.empty() || !UpdateAvailable(i) || BeingUpdated(i)) continue;
     const Game& game = AllGames()[i];
-    const std::string from = !installed_versions_[i].empty() ? installed_versions_[i] : (german_ ? "kopiert" : "copied");
+    const std::string from = !installed_versions_[i].empty() ? installed_versions_[i] : (german_ ? "kopiert" : NL("copied"));
     lines.push_back(std::string(german_ ? game.name_de : game.name_en) + ":  " + from + "  \xC2\xBB  " +
                     SetupVersion(game, setups_[i]));  // the fonts have Latin-1 only (no arrow)
   }
@@ -1680,7 +1720,7 @@ bool LauncherUi::DrawUpdatesFound(float width, float height) {
   const ImVec2 a{(width - bw) * 0.5f, (height - bh) * 0.5f}, b{a.x + bw, a.y + bh};
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
-  const char* title = german_ ? "Updates gefunden" : "Updates found";
+  const char* title = german_ ? "Updates gefunden" : NL("Updates found");
   Text(dl, bold_, 32 * u, {(width - TextWidth(bold_, 32 * u, title)) * 0.5f, a.y + 28 * u}, kGold, title);
   float y = a.y + 80 * u;
   for (const std::string& line : lines) {
@@ -1688,7 +1728,7 @@ bool LauncherUi::DrawUpdatesFound(float width, float height) {
     y += 30 * u;
   }
   const char* keeps = german_ ? "Spielst\xC3\xA4nde, Figuren, Discs und Einstellungen bleiben."
-                              : "Saves, figures, the discs and the settings stay.";
+                              : NL("Saves, figures, the discs and the settings stay.");
   Text(dl, regular_, 18 * u, {(width - TextWidth(regular_, 18 * u, keeps)) * 0.5f, y + 8 * u}, kDim, keeps);
   const ImGuiIO& io = ImGui::GetIO();
   auto button = [&](float x, const char* pad, ImU32 col, const char* label) {
@@ -1699,8 +1739,8 @@ bool LauncherUi::DrawUpdatesFound(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (260 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool yes = button(a.x + 60 * u, "A", Rgba(70, 170, 70), german_ ? "Herunterladen" : "Download");
-  const bool no = button(b.x - 320 * u, "B", Rgba(200, 60, 60), german_ ? "Sp\xC3\xA4ter" : "Later");
+  const bool yes = button(a.x + 60 * u, "A", Rgba(70, 170, 70), german_ ? "Herunterladen" : NL("Download"));
+  const bool no = button(b.x - 320 * u, "B", Rgba(200, 60, 60), german_ ? "Sp\xC3\xA4ter" : NL("Later"));
   ImGui::End();
   if (lines.empty()) {
     ask_updates_found_ = false;
@@ -1768,7 +1808,7 @@ void LauncherUi::AutoUpdateGames() {
   }
   if (names.empty()) return;
   StartUpdateAll();
-  ShowToast((german_ ? "Spiele werden aktualisiert: " : "Updating games: ") + names, 8.0);
+  ShowToast((german_ ? "Spiele werden aktualisiert: " : NL("Updating games: ")) + names, 8.0);
 }
 
 // "Alle aktualisieren": every installed game with an update, in the cards' order.
@@ -1796,9 +1836,9 @@ void LauncherUi::UpdateQueue() {
   }
   std::string text;
   if (update_failed_.empty()) {
-    text = german_ ? "Alle Spiele sind aktualisiert" : "All games are updated";
+    text = german_ ? "Alle Spiele sind aktualisiert" : NL("All games are updated");
   } else {
-    text = german_ ? "Nicht aktualisiert: " : "Not updated: ";
+    text = german_ ? "Nicht aktualisiert: " : NL("Not updated: ");
     for (size_t i = 0; i < update_failed_.size(); ++i) text += (i ? ", " : "") + update_failed_[i];
   }
   error_ = Wide(text);
@@ -1824,12 +1864,12 @@ void LauncherUi::DrawUpdateAll(float width, float u) {
     const size_t done = update_total_ - update_queue_.size();
     const size_t game = install_process_ ? install_game_ : work_->game;
     char line[200];
-    std::snprintf(line, sizeof(line), german_ ? "Aktualisiere %zu von %zu: %s" : "Updating %zu of %zu: %s", done,
+    std::snprintf(line, sizeof(line), german_ ? "Aktualisiere %zu von %zu: %s" : NL("Updating %zu of %zu: %s"), done,
                   update_total_, game < AllGames().size() ? (german_ ? AllGames()[game].name_de : AllGames()[game].name_en) : "");
     label = line;
     if (Downloading()) label += "  " + std::to_string(int(DownloadProgress() * 100.0f)) + " %";
   } else {
-    label = (german_ ? "Alle aktualisieren (" : "Update all (") + std::to_string(count) + ")";
+    label = (german_ ? "Alle aktualisieren (" : NL("Update all (")) + std::to_string(count) + ")";
   }
   const float glyph = update_total_ ? 30 * u : HintGlyphWidth(bold_, size, "LT", "U") + size * 0.4f;
   const float w = 36 * u + glyph + TextWidth(bold_, size, label.c_str());
@@ -1875,7 +1915,7 @@ void LauncherUi::ApplyGamesFolder(const std::filesystem::path& chosen) {
     if (!f.exe.empty() && f.exe.native().starts_with(dir.native())) ++found;
   }
   char line[160];
-  std::snprintf(line, sizeof(line), german_ ? "%zu Spiel(e) in diesem Ordner gefunden" : "%zu game(s) found in this folder", found);
+  std::snprintf(line, sizeof(line), german_ ? "%zu Spiel(e) in diesem Ordner gefunden" : NL("%zu game(s) found in this folder"), found);
   if (setup_.is_open()) setup_.UseGamesFolder(dir);
   if (hub_screen_.is_open()) {
     std::string en, de;
@@ -1895,11 +1935,12 @@ void LauncherUi::ApplyDataFolder(const std::filesystem::path& picked) {
   const std::filesystem::path from = SkylandersDir();
   std::error_code ec;
   std::string message;
-  const std::wstring inside = from.native() + L"\\";
+  const std::filesystem::path::string_type inside =
+      from.native() + std::filesystem::path::string_type(1, std::filesystem::path::preferred_separator);
   if (to == from || std::filesystem::equivalent(to, from, ec)) {
-    message = german_ ? "Das ist schon der Spieldaten-Ordner" : "That is the data folder already";
+    message = german_ ? "Das ist schon der Spieldaten-Ordner" : NL("That is the data folder already");
   } else if (to.native().starts_with(inside)) {
-    message = german_ ? "Der neue Ordner kann nicht im alten liegen" : "The new folder can't be inside the old one";
+    message = german_ ? "Der neue Ordner kann nicht im alten liegen" : NL("The new folder can't be inside the old one");
   } else {
     std::string error;
     if (data_move_.Start(from, to, error)) {
@@ -1907,7 +1948,7 @@ void LauncherUi::ApplyDataFolder(const std::filesystem::path& picked) {
              std::string(reinterpret_cast<const char*>(to.u8string().c_str())));
       return;
     }
-    message = (german_ ? "Geht nicht: " : "Not possible: ") + error;
+    message = (german_ ? "Geht nicht: " : NL("Not possible: ")) + error;
   }
   if (hub_screen_.is_open()) {
     hub_screen_.ShowMessage(message);
@@ -1924,7 +1965,7 @@ void LauncherUi::TogglePortableData() {
     // Turned on in a folder above the launcher's: off there, by hand.
     const std::string where = reinterpret_cast<const char*>(portable.u8string().c_str());
     message = std::string(skylanders::kPortableMarker) + (german_ ? " liegt in " + where + ": dort l\xC3\xB6schen"
-                                                                  : " is in " + where + ": delete it there");
+                                                                  : NL(" is in ") + where + NL(": delete it there"));
   } else {
     const bool on = portable.empty();
     const std::filesystem::path from = SkylandersDir();
@@ -1941,7 +1982,7 @@ void LauncherUi::TogglePortableData() {
              reinterpret_cast<const char*>(to.u8string().c_str()));
       if (!aside.empty()) {
         const std::string name = reinterpret_cast<const char*>(aside.filename().u8string().c_str());
-        ShowToast(german_ ? "Der Ordner von vorher hei\xC3\x9Ft jetzt " + name : "The folder from before is now called " + name, 8.0);
+        ShowToast(german_ ? "Der Ordner von vorher hei\xC3\x9Ft jetzt " + name : NL("The folder from before is now called ") + name, 8.0);
       }
       return;
     }
@@ -1950,7 +1991,7 @@ void LauncherUi::TogglePortableData() {
       std::error_code ec;
       std::filesystem::rename(aside, to, ec);
     }
-    message = (german_ ? "Geht nicht: " : "Not possible: ") + error;
+    message = (german_ ? "Geht nicht: " : NL("Not possible: ")) + error;
   }
   if (hub_screen_.is_open()) {
     hub_screen_.ShowMessage(message);
@@ -1989,10 +2030,10 @@ void LauncherUi::TakeDataMove() {
   }
   if (!error.empty()) {
     HubWarn("data folder: the move failed: " + error);
-    message = (german_ ? "Verschieben fehlgeschlagen: " : "The move failed: ") + error;
+    message = (german_ ? "Verschieben fehlgeschlagen: " : NL("The move failed: ")) + error;
   } else if (!told) {
     HubWarn("data folder: copied to " + to + ", but the pointer file couldn't be written");
-    message = german_ ? "Kopiert, aber die Spiele lie\xC3\x9F" "en sich nicht umstellen" : "Copied, but the games couldn't be told";
+    message = german_ ? "Kopiert, aber die Spiele lie\xC3\x9F" "en sich nicht umstellen" : NL("Copied, but the games couldn't be told");
   } else {
     if (DocumentsMoved()) SetSkylandersDirOverride(new_dir);
     HubLog("data folder: now " + to + (old_deleted ? " (the old one held only the settings and is gone)" : ""));
@@ -2020,7 +2061,7 @@ void LauncherUi::TakeDataMove() {
       old_data_.push_back({old_dir, new_dir});
       ask_old_data_ = true;
     }
-    message = (german_ ? "Spieldaten jetzt in " : "Game data now in ") + to;
+    message = (german_ ? "Spieldaten jetzt in " : NL("Game data now in ")) + to;
   }
   if (hub_screen_.is_open()) {
     std::string en, de;
@@ -2047,13 +2088,13 @@ bool LauncherUi::DrawDataMove(float width, float height) {
                    ImGuiWindowFlags_NoNav);
   ImDrawList* dl = ImGui::GetWindowDrawList();
   DrawBackdrop(dl, width, height, std::filesystem::path());
-  const char* title = german_ ? "Spieldaten werden verschoben ..." : "Moving the game data ...";
+  const char* title = german_ ? "Spieldaten werden verschoben ..." : NL("Moving the game data ...");
   Text(dl, bold_, 36 * u, {(width - TextWidth(bold_, 36 * u, title)) * 0.5f, height * 0.40f}, kGold, title);
   const char* note = german_ ? "Spielst\xC3\xA4nde, Figuren, Profile und Einstellungen. Der alte Ordner bleibt, bis du ihn l\xC3\xB6schst."
-                             : "Saves, figures, profiles and settings. The old folder stays until you delete it.";
+                             : NL("Saves, figures, profiles and settings. The old folder stays until you delete it.");
   Text(dl, regular_, 20 * u, {(width - TextWidth(regular_, 20 * u, note)) * 0.5f, height * 0.40f + 56 * u}, kDim, note);
   char count[64];
-  std::snprintf(count, sizeof(count), german_ ? "%zu Dateien kopiert" : "%zu files copied", data_move_.files());
+  std::snprintf(count, sizeof(count), german_ ? "%zu Dateien kopiert" : NL("%zu files copied"), data_move_.files());
   Text(dl, bold_, 22 * u, {(width - TextWidth(bold_, 22 * u, count)) * 0.5f, height * 0.40f + 200 * u}, kWhite, count);
   const ImVec2 c{width * 0.5f, height * 0.40f + 150 * u};
   const double t = ImGui::GetTime();
@@ -2083,13 +2124,13 @@ bool LauncherUi::DrawOldData(float width, float height) {
   const ImVec2 a{(width - bw) * 0.5f, (height - bh) * 0.5f}, b{a.x + bw, a.y + bh};
   dl->AddRectFilled(a, b, Rgba(16, 22, 60, 245), 24 * u);
   dl->AddRect(a, b, kGold, 24 * u, 0, 3 * u);
-  const char* title = german_ ? "Spieldaten umgezogen" : "Game data moved";
+  const char* title = german_ ? "Spieldaten umgezogen" : NL("Game data moved");
   Text(dl, bold_, 32 * u, {(width - TextWidth(bold_, 32 * u, title)) * 0.5f, a.y + 28 * u}, kGold, title);
   const std::string where = reinterpret_cast<const char*>(SkylandersDir().u8string().c_str());
-  const std::string line1 = (german_ ? "Spielst\xC3\xA4nde und Figuren aller Spiele liegen jetzt in " : "Every game's saves and figures are now in ") + where + ".";
+  const std::string line1 = (german_ ? "Spielst\xC3\xA4nde und Figuren aller Spiele liegen jetzt in " : NL("Every game's saves and figures are now in ")) + where + ".";
   const std::string line2 = (german_ ? "Die alten Ordner sind noch da, alles darin ist am neuen Ort: "
-                                     : "The old folders are still there, everything in them is in the new place: ") +
-                            OldDataNames(old_data_, 4, german_ ? "Dokumente\\" : "Documents\\");
+                                     : NL("The old folders are still there, everything in them is in the new place: ")) +
+                            OldDataNames(old_data_, 4, german_ ? "Dokumente\\" : NL("Documents\\"));
   Text(dl, regular_, 21 * u, {a.x + 40 * u, a.y + 84 * u}, kWhite, line1.c_str(), bw - 80 * u);
   Text(dl, regular_, 19 * u, {a.x + 40 * u, a.y + 150 * u}, kDim, line2.c_str(), bw - 80 * u);
   const ImGuiIO& io = ImGui::GetIO();
@@ -2101,13 +2142,13 @@ bool LauncherUi::DrawOldData(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (300 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool yes = button(a.x + 60 * u, "A", Rgba(200, 60, 60), german_ ? "Alte l\xC3\xB6schen" : "Delete old ones");
-  const bool no = button(b.x - 360 * u, "B", Rgba(70, 120, 200), german_ ? "Behalten" : "Keep them");
+  const bool yes = button(a.x + 60 * u, "A", Rgba(200, 60, 60), german_ ? "Alte l\xC3\xB6schen" : NL("Delete old ones"));
+  const bool no = button(b.x - 360 * u, "B", Rgba(70, 120, 200), german_ ? "Behalten" : NL("Keep them"));
   ImGui::End();
   if (yes || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     const int deleted = DeleteOldData(old_data_);
     char line[120];
-    std::snprintf(line, sizeof(line), german_ ? "%d alte(r) Ordner gel\xC3\xB6scht" : "%d old folder(s) deleted", deleted);
+    std::snprintf(line, sizeof(line), german_ ? "%d alte(r) Ordner gel\xC3\xB6scht" : NL("%d old folder(s) deleted"), deleted);
     ShowToast(line);
     old_data_.clear();
     ask_old_data_ = false;
@@ -2173,7 +2214,7 @@ void LauncherUi::UpdateDownload() {
   if (state == 3 || !BeginInstall(game, work_->update)) {
     HubWarn("download: " + std::string(AllGames()[game].name_en) + (state == 3 ? ": the download failed" : ": its setup didn't start"));
     if (update_total_ && work_->update) update_failed_.push_back(name);
-    error_ = Wide(name + (german_ ? ": Der Download ist fehlgeschlagen" : ": the download failed"));
+    error_ = Wide(name + (german_ ? ": Der Download ist fehlgeschlagen" : NL(": the download failed")));
     error_until_ = ImGui::GetTime() + 8.0;
   }
 }
@@ -2199,14 +2240,14 @@ bool LauncherUi::DrawHubUpdate(float width, float height) {
   const std::string title = "Core of Light " + release.version;
   Text(dl, bold_, 32 * u, {(width - TextWidth(bold_, 32 * u, title.c_str())) * 0.5f, a.y + 30 * u}, kGold, title.c_str());
   char line[200];
-  std::snprintf(line, sizeof(line), german_ ? "Installiert: %s   \xC2\xB7   Download: %.1f MB" : "Installed: %s   \xC2\xB7   Download: %.1f MB",
+  std::snprintf(line, sizeof(line), german_ ? "Installiert: %s   \xC2\xB7   Download: %.1f MB" : NL("Installed: %s   \xC2\xB7   Download: %.1f MB"),
                 COREOFLIGHT_VERSION, double(release.size) / (1024.0 * 1024.0));
   Text(dl, regular_, 21 * u, {(width - TextWidth(regular_, 21 * u, line)) * 0.5f, a.y + 84 * u}, kWhite, line);
   const char* keeps =
       portable_ ? (german_ ? "Der Hub l\xC3\xA4" "dt sie, tauscht seine Dateien aus und startet neu. Spiele und Spielst\xC3\xA4nde bleiben."
-                           : "The launcher downloads it, swaps its files and starts again. Games and saves stay.")
+                           : NL("The launcher downloads it, swaps its files and starts again. Games and saves stay."))
                 : (german_ ? "Der Hub l\xC3\xA4" "dt sie, installiert sie und startet neu. Spiele und Spielst\xC3\xA4nde bleiben."
-                           : "The launcher downloads it, installs it and starts again. Games and saves stay.");
+                           : NL("The launcher downloads it, installs it and starts again. Games and saves stay."));
   Text(dl, regular_, 18 * u, {(width - TextWidth(regular_, 18 * u, keeps)) * 0.5f, a.y + 118 * u}, kDim, keeps);
   const bool downloading = Downloading() && work_->hub;
   const int state = work_->download.load();
@@ -2219,19 +2260,18 @@ bool LauncherUi::DrawHubUpdate(float width, float height) {
     if (state == 2 && portable_) {
       // The portable launcher swaps its own files (portable.h) and starts the new one.
       work_->download = 0;
-      wchar_t self[MAX_PATH] = {};
-      GetModuleFileNameW(nullptr, self, MAX_PATH);
-      const std::filesystem::path exe_name = std::filesystem::path(self).filename();
+      const std::filesystem::path exe_name = platform::ExePath().filename();
       std::string why;
       if (ApplyPortableUpdate(work_->file, launcher_dir_, exe_name, german_, why)) {
         if (StartLauncher(launcher_dir_ / exe_name)) return false;  // the launcher quits; the new one runs
-        why = german_ ? "Der neue Hub lie\xC3\x9F sich nicht starten; starte ihn bitte selbst." : "Couldn't start the new launcher; please start it yourself.";
+        why = german_ ? "Der neue Hub lie\xC3\x9F sich nicht starten; starte ihn bitte selbst." : NL("Couldn't start the new launcher; please start it yourself.");
       }
       error_ = Wide(why);
       error_until_ = ImGui::GetTime() + 8.0;
       hub_update_put_off_ = true;
     } else if (state == 2) {
       work_->download = 0;
+#ifdef _WIN32
       STARTUPINFOW startup = {sizeof(startup)};
       PROCESS_INFORMATION info = {};
       // Into the folder this launcher runs from: under Wine the setup took its default folder in the
@@ -2244,12 +2284,13 @@ bool LauncherUi::DrawHubUpdate(float width, float height) {
         CloseHandle(info.hProcess);
         return false;  // the launcher quits; the setup replaces it and starts the new one
       }
-      error_ = german_ ? L"Das Update lie\x00DF sich nicht starten" : L"Could not start the update";
+#endif
+      error_ = german_ ? L"Das Update lie\x00DF sich nicht starten" : NLW(L"Could not start the update");
       error_until_ = ImGui::GetTime() + 8.0;
       hub_update_put_off_ = true;
     } else if (state == 3) {
       work_->download = 0;
-      error_ = german_ ? L"Der Download des Updates ist fehlgeschlagen" : L"The update's download failed";
+      error_ = german_ ? L"Der Download des Updates ist fehlgeschlagen" : NLW(L"The update's download failed");
       error_until_ = ImGui::GetTime() + 8.0;
       hub_update_put_off_ = true;
     }
@@ -2264,8 +2305,8 @@ bool LauncherUi::DrawHubUpdate(float width, float height) {
     ButtonHint(dl, bold_, 24 * u, {p.x + (260 * u - w) * 0.5f, p.y + 12 * u}, pad, col, label);
     return over && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
   };
-  const bool yes = button(a.x + 60 * u, "A", Rgba(70, 170, 70), german_ ? "Jetzt aktualisieren" : "Update now");
-  const bool no = button(b.x - 320 * u, "B", Rgba(200, 60, 60), german_ ? "Sp\xC3\xA4ter" : "Later");
+  const bool yes = button(a.x + 60 * u, "A", Rgba(70, 170, 70), german_ ? "Jetzt aktualisieren" : NL("Update now"));
+  const bool no = button(b.x - 320 * u, "B", Rgba(200, 60, 60), german_ ? "Sp\xC3\xA4ter" : NL("Later"));
   ImGui::End();
   if (yes || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown, false) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
     if (!Downloading() && !install_process_) {
@@ -2422,7 +2463,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
     // A changed vibration strength buzzes that player's pad (XInput slot 1 / 2) at once (#35).
     for (int p = 0; p < 2; ++p) {
       const std::string v = hub_screen_.EditedValue(p == 0 ? "pad_rumble_p1" : "pad_rumble_p2");
-      if (!rumble_seen_[p].empty() && v != rumble_seen_[p] && g_pad_connected[p]) PadBuzz(DWORD(p), std::atoi(v.c_str()));
+      if (!rumble_seen_[p].empty() && v != rumble_seen_[p] && g_pad_connected[p]) PadBuzz(p, std::atoi(v.c_str()));
       rumble_seen_[p] = v;
     }
     // Saved settings apply at once (the language with the next frame).
@@ -2472,7 +2513,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
     // the import from the file picked in the browser.
     if (action == "export_data" && !data_transfer_.running()) {
       data_transfer_.StartExport(found_, german_);
-      hub_screen_.ShowMessage(german_ ? "Exportiere ..." : "Exporting ...");
+      hub_screen_.ShowMessage(german_ ? "Exportiere ..." : NL("Exporting ..."));
     }
     if (action == "import_data" && !data_transfer_.running()) {
       browse_for_language_ = false;
@@ -2487,10 +2528,9 @@ bool LauncherUi::DrawScreens(float width, float height) {
         hub_screen_.ShowMessage(error);
       } else {
         const std::u8string file = report.filename().u8string();
-        hub_screen_.ShowMessage((german_ ? "Auf dem Desktop: " : "On the desktop: ") +
+        hub_screen_.ShowMessage((german_ ? "Auf dem Desktop: " : NL("On the desktop: ")) +
                                 std::string(file.begin(), file.end()));
-        const std::wstring select = L"/select,\"" + report.wstring() + L"\"";
-        ShellExecuteW(nullptr, L"open", L"explorer.exe", select.c_str(), nullptr, SW_SHOWNORMAL);
+        platform::ShowInFolder(report);
       }
     }
     return true;
@@ -2517,7 +2557,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
       const GameFilesCheck check = CheckGameFiles(f.rom, AllGames()[settings_game_].xex_sha256);
       if (check.ok()) {
         settings_.ShowMessage(german_ ? "Alles da (" + std::to_string(check.files) + " Dateien)"
-                                      : "Everything's there (" + std::to_string(check.files) + " files)");
+                                      : NL("Everything's there (") + std::to_string(check.files) + NL(" files)"));
       } else {
         std::vector<std::string> bad = check.missing;
         bad.insert(bad.end(), check.changed.begin(), check.changed.end());
@@ -2554,8 +2594,8 @@ bool LauncherUi::DrawScreens(float width, float height) {
       }
       HubLog("shader cache: " + UserDataName(exe) + ", " + std::to_string(removed) + " entries deleted");
       settings_.ShowMessage(removed ? (german_ ? "Shader-Cache geleert: der n\xC3\xA4" "chste Start baut ihn neu"
-                                               : "Shader cache emptied: the next start builds it again")
-                                    : (german_ ? "Der Shader-Cache ist schon leer" : "The shader cache is empty already"));
+                                               : NL("Shader cache emptied: the next start builds it again"))
+                                    : (german_ ? "Der Shader-Cache ist schon leer" : NL("The shader cache is empty already")));
     }
     return true;
   }
@@ -2722,7 +2762,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
       dl->AddRectFilled(a, b, over ? Rgba(70, 80, 150, 245) : Rgba(24, 30, 70, 240), 20 * u);
       dl->AddRect(a, b, kGold, 20 * u, 0, 3 * u);
       const char* line = german_ ? "Noch keine Disc eingelesen  \xC2\xB7  X: Disc einlesen (ISO ausw\xC3\xA4hlen)"
-                                 : "No disc set up yet  \xC2\xB7  X: add a disc (choose its ISO)";
+                                 : NL("No disc set up yet  \xC2\xB7  X: add a disc (choose its ISO)");
       Text(dl, bold_, 22 * u, {a.x + (bw - TextWidth(bold_, 22 * u, line)) * 0.5f, a.y + 19 * u}, kWhite, line);
       if (over && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) browser_.Open();
     }
@@ -2751,7 +2791,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
 
   // The figure folder and the hints at the bottom.
   // The folder as Windows names it when it is the usual one, else its path (coreoflight.ini).
-  std::string folder = german_ ? "Dokumente\\Skylanders\\Figures" : "Documents\\Skylanders\\Figures";
+  std::string folder = german_ ? "Dokumente\\Skylanders\\Figures" : NL("Documents\\Skylanders\\Figures");
   {
     const std::filesystem::path usual = SkylandersDir() / "Figures";
     if (FiguresDir() != usual) {
@@ -2761,10 +2801,10 @@ bool LauncherUi::DrawScreens(float width, float height) {
   }
   char figures[600];
   if (IsMainProfile(ActiveProfile())) {
-    std::snprintf(figures, sizeof(figures), german_ ? "%d Figuren im Ordner %s" : "%d figures in %s", figures_,
+    std::snprintf(figures, sizeof(figures), german_ ? "%d Figuren im Ordner %s" : NL("%d figures in %s"), figures_,
                   folder.c_str());
   } else {
-    std::snprintf(figures, sizeof(figures), german_ ? "%d Figuren im Profil %s" : "%d figures in the profile %s",
+    std::snprintf(figures, sizeof(figures), german_ ? "%d Figuren im Profil %s" : NL("%d figures in the profile %s"),
                   figures_, ActiveProfile().name.c_str());
   }
   // The figure count line that was here went (the owner: nobody needs it there, #25); the
@@ -2781,7 +2821,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
     const Game& game = AllGames()[pictures_game_];
     const std::string note =
         german_ ? std::string(game.name_de) + ": Bilder werden von der Disc gelesen. L\xC3\xA4uft im Hintergrund und endet von selbst."
-                : std::string(game.name_en) + ": reading its pictures from the disc. Runs in the background and ends by itself.";
+                : std::string(game.name_en) + NL(": reading its pictures from the disc. Runs in the background and ends by itself.");
     const float size = 19 * u, tw = TextWidth(regular_, size, note.c_str());
     const float right = width - 48 * u, x = right - tw - 46 * u;
     // Beside the figures line, or above it where the window is too narrow for both.
@@ -2799,16 +2839,16 @@ bool LauncherUi::DrawScreens(float width, float height) {
   // Smaller when it doesn't fit the window (handheld mode, a narrow window).
   static HintRowFit hint_row;
   const float hs = hint_row.Size(22 * u);
-  hx = Hint(dl, bold_, hs, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Starten" : "Play");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Einstellungen" : "Settings", "Tab");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Disc einlesen" : "Add a disc", "D");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "Start", Rgba(80, 90, 140), german_ ? "Figuren" : "Figures");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "RB", Rgba(80, 90, 140), german_ ? "Erfolge" : "Achievements");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "RT", Rgba(80, 90, 140), german_ ? "Spielst\xC3\xA4nde" : "Saves");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "Back", Rgba(80, 90, 140), german_ ? "Profile" : "Profiles", "P");
-  hx = Hint(dl, bold_, hs, {hx, hy}, "LB", Rgba(80, 90, 140), german_ ? "Hub" : "Hub");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "A", Rgba(70, 170, 70), german_ ? "Starten" : NL("Play"));
+  hx = Hint(dl, bold_, hs, {hx, hy}, "Y", Rgba(220, 180, 40), german_ ? "Einstellungen" : NL("Settings"), "Tab");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "X", Rgba(50, 120, 220), german_ ? "Disc einlesen" : NL("Add a disc"), "D");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "Start", Rgba(80, 90, 140), german_ ? "Figuren" : NL("Figures"));
+  hx = Hint(dl, bold_, hs, {hx, hy}, "RB", Rgba(80, 90, 140), german_ ? "Erfolge" : NL("Achievements"));
+  hx = Hint(dl, bold_, hs, {hx, hy}, "RT", Rgba(80, 90, 140), german_ ? "Spielst\xC3\xA4nde" : NL("Saves"));
+  hx = Hint(dl, bold_, hs, {hx, hy}, "Back", Rgba(80, 90, 140), german_ ? "Profile" : NL("Profiles"), "P");
+  hx = Hint(dl, bold_, hs, {hx, hy}, "LB", Rgba(80, 90, 140), german_ ? "Hub" : NL("Hub"));
   hx = Hint(dl, bold_, hs, {hx, hy}, "B", Rgba(200, 60, 60),
-            import_.running() ? (german_ ? "Einlesen abbrechen" : "Stop") : (german_ ? "Beenden" : "Quit"));
+            import_.running() ? (german_ ? "Einlesen abbrechen" : NL("Stop")) : (german_ ? "Beenden" : NL("Quit")));
   hint_row.End(48 * u, hx, width - 24 * u);
   // The disc being set up: what happens, and how far the unpacking is.
   const DiscImport::Phase phase = import_.phase();  // UpdateImport follows it
@@ -2817,7 +2857,7 @@ bool LauncherUi::DrawScreens(float width, float height) {
     std::string text = import_.message();
     if (ImGui::GetTime() < cancel_import_until_) {
       text = german_ ? "Noch einmal B: das Einlesen abbrechen (die Disc ist dann nicht eingerichtet)."
-                     : "B again: stop setting up the disc (it isn't set up then).";
+                     : NL("B again: stop setting up the disc (it isn't set up then).");
     }
     const ImU32 col = phase == DiscImport::Phase::kFailed ? Rgba(240, 110, 110)
                       : phase == DiscImport::Phase::kDone ? Rgba(110, 220, 110)
@@ -2843,9 +2883,9 @@ bool LauncherUi::DrawScreens(float width, float height) {
     const float left_s = float(platinum_until_ - ImGui::GetTime());
     const float fade = std::clamp(std::min(left_s, 12.0f - left_s) * 2.0f, 0.0f, 1.0f);
     const Game& game = AllGames()[size_t(platinum_new_)];
-    const std::string title = german_ ? "PLATIN-TROPH\xC3\x84" "E!" : "PLATINUM TROPHY!";
+    const std::string title = german_ ? "PLATIN-TROPH\xC3\x84" "E!" : NL("PLATINUM TROPHY!");
     const std::string about = std::string(german_ ? game.name_de : game.name_en) +
-                              (german_ ? ": alle Erfolge freigeschaltet" : ": every achievement unlocked");
+                              (german_ ? ": alle Erfolge freigeschaltet" : NL(": every achievement unlocked"));
     const float bw = std::max(TextWidth(bold_, 30 * u, title.c_str()), TextWidth(regular_, 20 * u, about.c_str())) +
                      130 * u;
     const ImVec2 a{(width - bw) * 0.5f, 26 * u}, b{a.x + bw, a.y + 92 * u};

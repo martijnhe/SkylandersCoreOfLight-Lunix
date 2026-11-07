@@ -1,6 +1,8 @@
 #include "saves.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -8,6 +10,7 @@
 
 #include "games.h"
 #include "profiles.h"
+#include "platform.h"
 
 namespace coreoflight {
 namespace fs = std::filesystem;
@@ -17,11 +20,7 @@ constexpr wchar_t kProfileFolder[] = L"B13EBABEBABEBABE";  // the profile the ga
 
 fs::path Utf8Path(const std::string& s) { return fs::path(std::u8string(s.begin(), s.end())); }
 
-uint64_t FileTime(const fs::path& path) {
-  WIN32_FILE_ATTRIBUTE_DATA data;
-  if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) return 0;
-  return uint64_t(data.ftLastWriteTime.dwHighDateTime) << 32 | data.ftLastWriteTime.dwLowDateTime;
-}
+uint64_t FileTime(const fs::path& path) { return platform::FileWriteTime(path); }
 
 // The newest file in a folder and below (copies keep their files' times).
 uint64_t NewestFile(const fs::path& dir) {
@@ -72,11 +71,10 @@ bool CopyTree(const fs::path& from, const fs::path& to) {
 }
 
 std::string NowName() {
-  SYSTEMTIME t{};
-  GetLocalTime(&t);
+  const platform::LocalTime t = platform::LocalNow();
   char text[32];
-  std::snprintf(text, sizeof(text), "%04u-%02u-%02u %02u-%02u-%02u", t.wYear, t.wMonth, t.wDay, t.wHour,
-                t.wMinute, t.wSecond);
+  std::snprintf(text, sizeof(text), "%04d-%02d-%02d %02d-%02d-%02d", t.year, t.month, t.day, t.hour, t.minute,
+                t.second);
   return text;
 }
 

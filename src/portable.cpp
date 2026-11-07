@@ -1,8 +1,11 @@
 #include "portable.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#endif
 
+#include <cerrno>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -11,13 +14,15 @@
 #include "crc32.h"
 #include "hub_log.h"
 #include "inflate.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace fs = std::filesystem;
 
 namespace {
 
-constexpr wchar_t kMarker[] = L"portable.txt";
+constexpr char kMarker[] = "portable.txt";
 
 uint32_t Get16(const unsigned char* p) { return uint32_t(p[0]) | uint32_t(p[1]) << 8; }
 uint32_t Get32(const unsigned char* p) { return Get16(p) | Get16(p + 2) << 16; }
@@ -47,7 +52,7 @@ struct Entry {
 
 // Every file of the ZIP, stored or deflated, each checked against its CRC.
 bool ReadZip(const fs::path& file, std::vector<Entry>& entries, bool german, std::string& error) {
-  const std::string broken = german ? "Das heruntergeladene Update ist besch\xC3\xA4" "digt." : "The downloaded update is damaged.";
+  const std::string broken = german ? "Das heruntergeladene Update ist besch\xC3\xA4" "digt." : NL("The downloaded update is damaged.");
   std::ifstream in(file, std::ios::binary);
   const std::vector<char> zip((std::istreambuf_iterator<char>(in)), {});
   if (zip.size() < 22) {
@@ -114,7 +119,30 @@ bool ReadZip(const fs::path& file, std::vector<Entry>& entries, bool german, std
   return true;
 }
 
-fs::path WithSuffix(const fs::path& p, const wchar_t* suffix) { return fs::path(p.native() + suffix); }
+fs::path WithSuffix(const fs::path& p, const std::string& suffix) {
+  fs::path out = p;
+  out += suffix;
+  return out;
+}
+
+// A rename, over an existing file with `replace` (MoveFileExW on Windows: a running exe or DLL can
+// be renamed, not replaced); false and the system's error code in `code`.
+bool Move(const fs::path& from, const fs::path& to, bool replace, unsigned long& code) {
+#ifdef _WIN32
+  if (MoveFileExW(from.c_str(), to.c_str(), replace ? MOVEFILE_REPLACE_EXISTING : 0)) return true;
+  code = GetLastError();
+  return false;
+#else
+  std::error_code ec;
+  if (!replace && fs::exists(to, ec)) {
+    code = EEXIST;
+    return false;
+  }
+  fs::rename(from, to, ec);
+  code = static_cast<unsigned long>(ec.value());
+  return !ec;
+#endif
+}
 
 std::string Utf8(const fs::path& p) {
   const std::u8string u8 = p.u8string();
@@ -138,12 +166,12 @@ bool ApplyPortableUpdate(const fs::path& zip, const fs::path& launcher_dir, cons
     has_marker |= e.path == fs::path(kMarker);
   }
   if (!has_exe || !has_marker) {
-    error = german ? "Das Update ist kein portabler Core of Light." : "The update isn't a portable Core of Light.";
+    error = german ? "Das Update ist kein portabler Core of Light." : NL("The update isn't a portable Core of Light.");
     return false;
   }
   std::error_code ec;
   const std::string cant_write = german ? "Der Ordner des Hubs l\xC3\xA4sst sich nicht beschreiben."
-                                        : "Can't write to the launcher's folder.";
+                                        : NL("Can't write to the launcher's folder.");
   // 1. Every new file next to its place as <name>.new: a full disk or a read-only folder fails here,
   // before anything is replaced.
   std::vector<fs::path> fresh;
@@ -153,10 +181,17 @@ bool ApplyPortableUpdate(const fs::path& zip, const fs::path& launcher_dir, cons
   for (const Entry& e : entries) {
     const fs::path target = launcher_dir / e.path;
     fs::create_directories(target.parent_path(), ec);
-    const fs::path f = WithSuffix(target, L".new");
+    const fs::path f = WithSuffix(target, ".new");
     std::ofstream out(f, std::ios::binary | std::ios::trunc);
     out.write(e.data.data(), std::streamsize(e.data.size()));
     out.close();
+#ifndef _WIN32
+    // A ZIP made on Windows keeps no Unix permissions: the launcher itself has to run.
+    if (out && e.path == exe_name) {
+      fs::permissions(f, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec, fs::perm_options::add,
+                      ec);
+    }
+#endif
     if (!out) {
       fs::remove(f, ec);
       drop_fresh();
@@ -175,7 +210,8 @@ bool ApplyPortableUpdate(const fs::path& zip, const fs::path& launcher_dir, cons
     for (auto it = swapped.rbegin(); it != swapped.rend(); ++it) {
       if (!it->old.empty()) {
         fs::remove(it->target, ec);
-        MoveFileExW(it->old.c_str(), it->target.c_str(), MOVEFILE_REPLACE_EXISTING);
+        unsigned long code = 0;
+        Move(it->old, it->target, true, code);
       } else {
         fs::remove(it->target, ec);
       }
@@ -187,12 +223,13 @@ bool ApplyPortableUpdate(const fs::path& zip, const fs::path& launcher_dir, cons
     Swap swap{target, {}};
     if (fs::exists(target, ec)) {
       // An .old one from an earlier update that is still in use can't go: then .old2, .old3 ...
-      fs::path old = WithSuffix(target, L".old");
+      fs::path old = WithSuffix(target, ".old");
       for (int n = 2; fs::exists(old, ec) && !fs::remove(old, ec) && n < 100; ++n) {
-        old = WithSuffix(target, (L".old" + std::to_wstring(n)).c_str());
+        old = WithSuffix(target, ".old" + std::to_string(n));
       }
-      if (!MoveFileExW(target.c_str(), old.c_str(), 0)) {
-        HubWarn("portable update: can't move " + Utf8(target) + " aside (error " + std::to_string(GetLastError()) + ")");
+      unsigned long code = 0;
+      if (!Move(target, old, false, code)) {
+        HubWarn("portable update: can't move " + Utf8(target) + " aside (error " + std::to_string(code) + ")");
         roll_back();
         error = cant_write;
         return false;
@@ -200,8 +237,9 @@ bool ApplyPortableUpdate(const fs::path& zip, const fs::path& launcher_dir, cons
       swap.old = old;
     }
     swapped.push_back(swap);
-    if (!MoveFileExW(WithSuffix(target, L".new").c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-      HubWarn("portable update: can't put " + Utf8(target) + " in place (error " + std::to_string(GetLastError()) + ")");
+    unsigned long code = 0;
+    if (!Move(WithSuffix(target, ".new"), target, true, code)) {
+      HubWarn("portable update: can't put " + Utf8(target) + " in place (error " + std::to_string(code) + ")");
       roll_back();
       error = cant_write;
       return false;
@@ -211,6 +249,7 @@ bool ApplyPortableUpdate(const fs::path& zip, const fs::path& launcher_dir, cons
   return true;
 }
 
+#ifdef _WIN32
 bool StartLauncher(const fs::path& exe) {
   STARTUPINFOW startup = {sizeof(startup)};
   PROCESS_INFORMATION info = {};
@@ -237,14 +276,29 @@ bool StartLauncher(const fs::path& exe) {
   CloseHandle(info.hProcess);
   return true;
 }
+#else
+bool StartLauncher(const fs::path& exe) {
+  // This launcher's own arguments go along (from /proc/self/cmdline), except the update test's.
+  std::ifstream in("/proc/self/cmdline", std::ios::binary);
+  std::vector<std::string> args;
+  bool first = true;
+  for (std::string arg; std::getline(in, arg, '\0'); first = false) {
+    if (first || arg.starts_with("--portable_update=")) continue;
+    args.push_back(arg);
+  }
+  void* process = platform::StartProcess(exe, args, exe.parent_path(), false);
+  platform::CloseProcess(process);
+  return process != nullptr;
+}
+#endif
 
 void RemoveUpdateLeftovers(const fs::path& launcher_dir) {
   std::error_code ec;
   std::vector<fs::path> leftovers;
   for (fs::recursive_directory_iterator it(launcher_dir, ec), end; !ec && it != end; it.increment(ec)) {
     if (!it->is_regular_file(ec)) continue;
-    const std::wstring ext = it->path().extension().native();
-    if (ext == L".new" || ext.starts_with(L".old")) leftovers.push_back(it->path());
+    const std::string ext = it->path().extension().string();
+    if (ext == ".new" || ext.starts_with(".old")) leftovers.push_back(it->path());
   }
   for (const fs::path& p : leftovers) {
     // A file whose name ends in .old<n> without its file next to it isn't one of ours: leave it.

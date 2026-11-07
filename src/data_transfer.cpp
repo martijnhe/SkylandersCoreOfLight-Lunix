@@ -1,7 +1,9 @@
 #include "data_transfer.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -15,6 +17,8 @@
 
 #include "crc32.h"
 #include "hub_log.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace fs = std::filesystem;
@@ -44,8 +48,12 @@ uint32_t Crc32(const std::vector<char>& data) { return coreoflight::Crc32(data.d
 // A path past Windows' 260 characters with the prefix that lets it through (a data folder deep in
 // another folder: a test's import into one lost 108 of 337 figures).
 fs::path Long(const fs::path& p) {
+#ifdef _WIN32
   if (p.native().size() < 240 || !p.is_absolute() || p.native().starts_with(L"\\\\?\\")) return p;
   return fs::path(L"\\\\?\\" + p.lexically_normal().native());
+#else
+  return p;  // no such limit off Windows
+#endif
 }
 
 bool ReadAll(const fs::path& file, std::vector<char>& out) {
@@ -76,7 +84,11 @@ class ZipWriter {
     // The file time as DOS keeps it: now (the import doesn't use it).
     const std::time_t now = std::time(nullptr);
     std::tm t{};
+    #ifdef _WIN32
     localtime_s(&t, &now);
+#else
+    localtime_r(&now, &t);
+#endif
     const uint32_t dos_time = uint32_t(t.tm_hour << 11 | t.tm_min << 5 | t.tm_sec / 2);
     const uint32_t dos_date = uint32_t((t.tm_year - 80) << 9 | (t.tm_mon + 1) << 5 | t.tm_mday);
     const uint32_t crc = Crc32(data), size = uint32_t(data.size());
@@ -178,16 +190,12 @@ bool SafeRelative(const std::string& name, fs::path& out) {
 }  // namespace
 
 fs::path ExportFolder() {
-  auto known = [](REFKNOWNFOLDERID id) {
-    PWSTR path = nullptr;
-    fs::path out;
-    if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &path))) out = path;
-    CoTaskMemFree(path);
-    return out;
-  };
   // --documents (a test on stand-in data): that folder, so a test never writes onto the desktop.
-  if (DocumentsDir() != known(FOLDERID_Documents)) return DocumentsDir();
-  return known(FOLDERID_Desktop);
+  if (DocumentsMoved()) return DocumentsDir();
+  if (DocumentsDir() != platform::GetUserFolder(platform::UserFolder::kDocuments)) return DocumentsDir();
+  const fs::path desktop = platform::GetUserFolder(platform::UserFolder::kDesktop);
+  // A Steam Deck in game mode has no desktop to see it on: Documents then.
+  return desktop.empty() ? DocumentsDir() : desktop;
 }
 
 void DataTransfer::StartExport(const std::vector<Found>& games, bool german) {
@@ -208,7 +216,11 @@ void DataTransfer::StartExport(const std::vector<Found>& games, bool german) {
     char date[32];
     const std::time_t now = std::time(nullptr);
     std::tm t{};
+    #ifdef _WIN32
     localtime_s(&t, &now);
+#else
+    localtime_r(&now, &t);
+#endif
     std::strftime(date, sizeof(date), "%Y-%m-%d %H-%M", &t);
     const fs::path desktop = ExportFolder();
     const fs::path file = desktop / (std::string("Skylanders data ") + date + ".zip");
@@ -260,7 +272,7 @@ void DataTransfer::StartExport(const std::vector<Found>& games, bool german) {
     if (!ok || ec) {
       fs::remove(temp, ec);
       summary = german ? "Der Export hat nicht geklappt (der Desktop ist nicht beschreibbar?)."
-                       : "The export didn't work (can't write to the desktop?).";
+                       : NL("The export didn't work (can't write to the desktop?).");
       HubWarn("data export: failed");
     } else {
       written = file;
@@ -268,7 +280,7 @@ void DataTransfer::StartExport(const std::vector<Found>& games, bool german) {
       const std::u8string name = file.filename().u8string();
       std::snprintf(line, sizeof(line),
                     german ? "Auf dem Desktop: %s (%zu Figuren, %zu Spielst\xC3\xA4nde und mehr, %zu Spiel-Einstellungen)."
-                           : "On the desktop: %s (%zu figures, %zu saves and more, %zu games' settings).",
+                           : NL("On the desktop: %s (%zu figures, %zu saves and more, %zu games' settings)."),
                     reinterpret_cast<const char*>(name.c_str()), figures, saves, settings.size());
       summary = line;
     }
@@ -286,7 +298,7 @@ bool DataTransfer::PlanImport(const fs::path& file, const std::vector<Found>& ga
   import_file_ = file;
   std::vector<char> zip;
   if (!ReadAll(file, zip) || zip.size() < 22) {
-    error = german ? "Die Datei l\xC3\xA4sst sich nicht lesen." : "Can't read the file.";
+    error = german ? "Die Datei l\xC3\xA4sst sich nicht lesen." : NL("Can't read the file.");
     return false;
   }
   const auto* bytes = reinterpret_cast<const unsigned char*>(zip.data());
@@ -300,7 +312,7 @@ bool DataTransfer::PlanImport(const fs::path& file, const std::vector<Found>& ga
     if (i == 0 || zip.size() - i > 22 + 0xFFFF) break;
   }
   const char* not_ours = german ? "Das ist kein Export von \xE2\x80\x9EMeine Daten exportieren\xE2\x80\x9C."
-                                : "That isn't a file from \"Export my data\".";
+                                : NL("That isn't a file from \"Export my data\".");
   if (end == std::string::npos) {
     error = not_ours;
     return false;
@@ -345,7 +357,7 @@ bool DataTransfer::PlanImport(const fs::path& file, const std::vector<Found>& ga
     if (method != 0 || size != usize) {
       // Packed again with compression (by Windows or another tool): this launcher only reads its own.
       error = german ? "Die Datei wurde neu gepackt; nimm bitte die Datei, wie der Export sie gemacht hat."
-                     : "The file was packed again; please take it as the export made it.";
+                     : NL("The file was packed again; please take it as the export made it.");
       return false;
     }
     Item item;
@@ -454,28 +466,28 @@ void DataTransfer::StartImport(bool replace_settings) {
     }
     // Short: the toast is one line. The numbers that are 0 are left out.
     char line[400];
-    std::snprintf(line, sizeof(line), german ? "Import: %zu neu, %zu schon da." : "Import: %zu new, %zu there already.",
+    std::snprintf(line, sizeof(line), german ? "Import: %zu neu, %zu schon da." : NL("Import: %zu new, %zu there already."),
                   added, same);
     std::string summary = line;
     if (replaced) {
-      std::snprintf(line, sizeof(line), german ? " %zu Spiel-Einstellungen ersetzt." : " %zu games' settings replaced.",
+      std::snprintf(line, sizeof(line), german ? " %zu Spiel-Einstellungen ersetzt." : NL(" %zu games' settings replaced."),
                     replaced);
       summary += line;
     }
     if (!kept.empty()) {
-      summary += german ? " Behalten (deins ist anders): " : " Kept (yours differ): ";
+      summary += german ? " Behalten (deins ist anders): " : NL(" Kept (yours differ): ");
       for (size_t i = 0; i < kept.size() && i < 3; ++i) summary += (i ? ", " : "") + kept[i];
       if (kept.size() > 3) summary += ", ...";
       summary += ".";
     }
     if (waiting) {
       summary += german ? " Einstellungen nicht eingerichteter Spiele warten, bis sie eingerichtet sind: dann noch einmal importieren."
-                        : " Settings of games not set up yet wait until they are: then import again.";
+                        : NL(" Settings of games not set up yet wait until they are: then import again.");
     }
     if (!broken.empty()) {
-      summary += german ? " Nicht lesbar: " : " Couldn't read: ";
+      summary += german ? " Nicht lesbar: " : NL(" Couldn't read: ");
       summary += std::to_string(broken.size());
-      summary += german ? " Dateien." : " files.";
+      summary += german ? " Dateien." : NL(" files.");
     }
     char log[200];
     std::snprintf(log, sizeof(log), "data import: %zu new, %zu same, %zu settings replaced, %zu kept, %zu waiting, %zu broken",

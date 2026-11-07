@@ -1,6 +1,8 @@
 #include "achievements.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -10,6 +12,7 @@
 
 #include "games.h"
 #include "profiles.h"
+#include "platform.h"
 
 namespace coreoflight {
 namespace {
@@ -114,25 +117,23 @@ GameAchievements LoadAchievements(const Game& game, const Profile& profile) {
 
 std::string FileTimeDate(uint64_t filetime, bool german) {
   if (filetime <= 1) return {};
-  FILETIME utc{DWORD(filetime), DWORD(filetime >> 32)}, local{};
-  SYSTEMTIME st{};
-  if (!FileTimeToLocalFileTime(&utc, &local) || !FileTimeToSystemTime(&local, &st)) return {};
+  platform::LocalTime st;
+  if (!platform::ToLocalTime(filetime, st)) return {};
   char text[32];
   if (german) {
-    std::snprintf(text, sizeof(text), "%02u.%02u.%04u", unsigned(st.wDay), unsigned(st.wMonth), unsigned(st.wYear));
+    std::snprintf(text, sizeof(text), "%02u.%02u.%04u", unsigned(st.day), unsigned(st.month), unsigned(st.year));
   } else {
-    std::snprintf(text, sizeof(text), "%04u-%02u-%02u", unsigned(st.wYear), unsigned(st.wMonth), unsigned(st.wDay));
+    std::snprintf(text, sizeof(text), "%04u-%02u-%02u", unsigned(st.year), unsigned(st.month), unsigned(st.day));
   }
   return text;
 }
 
 std::string FileTimeClock(uint64_t filetime) {
   if (filetime <= 1) return {};
-  FILETIME utc{DWORD(filetime), DWORD(filetime >> 32)}, local{};
-  SYSTEMTIME st{};
-  if (!FileTimeToLocalFileTime(&utc, &local) || !FileTimeToSystemTime(&local, &st)) return {};
+  platform::LocalTime st;
+  if (!platform::ToLocalTime(filetime, st)) return {};
   char text[16];
-  std::snprintf(text, sizeof(text), "%02u:%02u", unsigned(st.wHour), unsigned(st.wMinute));
+  std::snprintf(text, sizeof(text), "%02u:%02u", unsigned(st.hour), unsigned(st.minute));
   return text;
 }
 

@@ -1,8 +1,15 @@
 #include "problem_report.h"
 
+#ifndef _WIN32
+#include <unistd.h>
+
+#include <cstring>
+#endif
+#ifdef _WIN32
 #include <windows.h>
 #include <dxgi.h>
 #include <shlobj.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -16,17 +23,18 @@
 #include "hub_log.h"
 #include "hub_settings.h"
 #include "xiso.h"
+#include "gpu_tier.h"
+#include "handheld.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace fs = std::filesystem;
 namespace {
 
 std::string Utf8(const std::wstring& w) {
-  if (w.empty()) return {};
-  const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), int(w.size()), nullptr, 0, nullptr, nullptr);
-  std::string s(size_t(std::max(n, 0)), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, w.data(), int(w.size()), s.data(), n, nullptr, nullptr);
-  return s;
+  const std::u8string s = std::filesystem::path(w).u8string();
+  return std::string(s.begin(), s.end());
 }
 
 std::string Utf8(const fs::path& p) {
@@ -79,6 +87,14 @@ void ReplaceAll(std::string& text, const std::string& from, const std::string& t
 // The user's profile folder (both slash directions), the user name and the computer's name.
 std::vector<std::pair<std::string, std::string>> PrivateWords() {
   std::vector<std::pair<std::string, std::string>> words;
+#ifndef _WIN32
+  // The home folder becomes ~, the user's and the machine's names <user> and <computer>.
+  if (const std::string home = platform::Env("HOME"); home.size() >= 4) words.emplace_back(home, "~");
+  if (const std::string user = platform::Env("USER"); user.size() >= 3) words.emplace_back(user, "<user>");
+  char host[256] = "";
+  if (gethostname(host, sizeof(host)) == 0 && std::strlen(host) >= 3) words.emplace_back(host, "<computer>");
+  return words;
+#else
   wchar_t buffer[MAX_PATH] = {};
   DWORD n = GetEnvironmentVariableW(L"USERPROFILE", buffer, MAX_PATH);
   if (n && n < MAX_PATH) {
@@ -98,6 +114,7 @@ std::vector<std::pair<std::string, std::string>> PrivateWords() {
     if (pc.size() >= 3) words.emplace_back(pc, "%COMPUTERNAME%");
   }
   return words;
+#endif
 }
 
 // A file's text, at most the last `cap` bytes of it (a long log's end is what counts).
@@ -115,6 +132,7 @@ std::string ReadTail(const fs::path& path, size_t cap = 8u << 20) {
   return data;
 }
 
+#ifdef _WIN32
 std::string ProcessorName() {
   wchar_t name[256] = {};
   DWORD size = sizeof(name);
@@ -154,6 +172,35 @@ std::string GraphicsCards() {
   factory->Release();
   return out;
 }
+#else
+std::string ProcessorName() {
+  const std::string cpu = DetectHandheld().cpu;
+  return cpu.empty() ? "?" : cpu;
+}
+
+// The graphics card the launcher draws with (gpu_tier.h), and the cards in sysfs by their ids.
+std::string GraphicsCards() {
+  const GpuInfo& gpu = DetectGpu();
+  char text[160];
+  std::snprintf(text, sizeof(text), "  %s (vendor 0x%04X, %llu MB)\n", gpu.name.empty() ? "?" : gpu.name.c_str(),
+                unsigned(gpu.vendor), static_cast<unsigned long long>(gpu.vram_mb));
+  std::string out = text;
+  std::error_code ec;
+  for (auto it = fs::directory_iterator("/sys/class/drm", ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+    const std::string card = it->path().filename().string();
+    if (card.rfind("card", 0) != 0 || card.find('-') != std::string::npos) continue;
+    std::ifstream vendor(it->path() / "device" / "vendor"), device(it->path() / "device" / "device");
+    std::ifstream driver_link;
+    std::string v, d;
+    vendor >> v;
+    device >> d;
+    std::error_code link_ec;
+    const std::string driver = fs::read_symlink(it->path() / "device" / "driver", link_ec).filename().string();
+    if (!v.empty()) out += "  " + card + ": vendor " + v + ", device " + d + (driver.empty() ? "" : ", driver " + driver) + "\n";
+  }
+  return out;
+}
+#endif
 
 const char* DiscText(DiscState state) {
   switch (state) {
@@ -172,11 +219,11 @@ const char* DiscText(DiscState state) {
 }
 
 // The newest `count` files with `extension` in `dir`.
-std::vector<fs::path> Newest(const fs::path& dir, const std::wstring& extension, size_t count) {
+std::vector<fs::path> Newest(const fs::path& dir, const std::string& extension, size_t count) {
   std::vector<std::pair<fs::file_time_type, fs::path>> files;
   std::error_code ec;
   for (const auto& entry : fs::directory_iterator(dir, ec)) {
-    if (entry.is_regular_file(ec) && entry.path().extension().wstring() == extension) {
+    if (entry.is_regular_file(ec) && entry.path().extension().string() == extension) {
       files.emplace_back(entry.last_write_time(ec), entry.path());
     }
   }
@@ -190,17 +237,12 @@ std::vector<fs::path> Newest(const fs::path& dir, const std::wstring& extension,
 
 fs::path WriteProblemReport(const std::vector<Found>& found, const fs::path& launcher_dir, bool german,
                             std::string& error) {
-  PWSTR desktop_w = nullptr;
-  fs::path desktop;
-  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Desktop, 0, nullptr, &desktop_w))) desktop = desktop_w;
-  CoTaskMemFree(desktop_w);
+  fs::path desktop = platform::GetUserFolder(platform::UserFolder::kDesktop);
   if (desktop.empty()) desktop = DocumentsDir();
-  SYSTEMTIME t{};
-  GetLocalTime(&t);
-  wchar_t name[96];
-  std::swprintf(name, std::size(name), L"%ls-%04u-%02u-%02u-%02u%02u.txt",
-                L"Skylanders-problem-report", t.wYear, t.wMonth, t.wDay,
-                t.wHour, t.wMinute);
+  const platform::LocalTime t = platform::LocalNow();
+  char name[96];
+  std::snprintf(name, std::size(name), "Skylanders-problem-report-%04d-%02d-%02d-%02d%02d.txt", t.year, t.month, t.day,
+                t.hour, t.minute);
   const fs::path report_path = desktop / name;
 
   const auto words = PrivateWords();
@@ -214,20 +256,24 @@ fs::path WriteProblemReport(const std::vector<Found>& found, const fs::path& lau
   // What the PC is and which games the launcher found.
   std::string info;
   char line[256];
-  std::snprintf(line, sizeof(line), "Core of Light " COREOFLIGHT_VERSION " problem report, %04u-%02u-%02u %02u:%02u\n\n",
-                t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute);
+  std::snprintf(line, sizeof(line), "Core of Light " COREOFLIGHT_VERSION " problem report, %04d-%02d-%02d %02d:%02d\n\n",
+                t.year, t.month, t.day, t.hour, t.minute);
   info += line;
-  info += "Windows " + WindowsVersion() + "\n";
+  info += platform::SystemName() + (platform::OnSteamDeck() ? ", Steam Deck" : "") + "\n";
   info += "Processor: " + ProcessorName() + "\n";
+#ifdef _WIN32
   MEMORYSTATUSEX memory{};
   memory.dwLength = sizeof(memory);
   GlobalMemoryStatusEx(&memory);
-  std::snprintf(line, sizeof(line), "Memory: %llu MB\n", static_cast<unsigned long long>(memory.ullTotalPhys >> 20));
+  const unsigned long long total_memory = memory.ullTotalPhys;
+#else
+  const unsigned long long total_memory =
+      static_cast<unsigned long long>(sysconf(_SC_PHYS_PAGES)) * static_cast<unsigned long long>(sysconf(_SC_PAGE_SIZE));
+#endif
+  std::snprintf(line, sizeof(line), "Memory: %llu MB\n", total_memory >> 20);
   info += line;
   info += "Graphics cards:\n" + GraphicsCards();
-  wchar_t exe[MAX_PATH] = {};
-  GetModuleFileNameW(nullptr, exe, MAX_PATH);
-  info += "Launcher: " + Utf8(fs::path(exe)) + "\n";
+  info += "Launcher: " + Utf8(platform::ExePath()) + "\n";
   // Where the saves and figures are (the one data folder since 0.2.0-beta.3, data_move.h).
   info += "Data folder: " + Utf8(SkylandersDir()) + "\n\nGames:\n";
   const auto& games = AllGames();
@@ -270,7 +316,7 @@ fs::path WriteProblemReport(const std::vector<Found>& found, const fs::path& lau
     // that says why.
     size_t game_notes = 0;
     for (const fs::path& dir : dirs) {
-      const std::vector<fs::path> logs = Newest(dir, L".log", 40);
+      const std::vector<fs::path> logs = Newest(dir, ".log", 40);
       size_t taken = 0;
       for (size_t k = 0; k < logs.size() && taken < 4; ++k) {
         std::error_code ec;
@@ -283,7 +329,7 @@ fs::path WriteProblemReport(const std::vector<Found>& found, const fs::path& lau
       }
       // The game's own problem notes (its settings menu's Report a problem, skylanders-portal
       // problem_note.h): the newest three, their pictures next to the report.
-      for (const fs::path& note : Newest(dir, L".txt", 40)) {
+      for (const fs::path& note : Newest(dir, ".txt", 40)) {
         if (note.filename().wstring().rfind(L"problem-", 0) != 0) continue;
         if (game_notes >= 3) break;
         report.Add(folder + "notes/" + Utf8(note.filename()), clean(ReadTail(note)));
@@ -294,11 +340,8 @@ fs::path WriteProblemReport(const std::vector<Found>& found, const fs::path& lau
   }
 
   // The setups' logs (%TEMP%\CoreOfLight\<key>-setup.log) and the launcher's own settings.
-  wchar_t temp[MAX_PATH] = {};
-  if (GetTempPathW(MAX_PATH, temp)) {
-    for (const fs::path& log : Newest(fs::path(temp) / "CoreOfLight", L".log", 12)) {
-      report.Add("setup/" + Utf8(log.filename()), clean(ReadTail(log, kLogTail)));
-    }
+  for (const fs::path& log : Newest(platform::TempDir(), ".log", 12)) {
+    report.Add("setup/" + Utf8(log.filename()), clean(ReadTail(log, kLogTail)));
   }
   for (const fs::path& file : {HubSettingsFile(), launcher_dir / "coreoflight.ini"}) {
     if (std::string text = ReadTail(file); !text.empty()) report.Add("launcher/" + Utf8(file.filename()), clean(text));
@@ -307,7 +350,7 @@ fs::path WriteProblemReport(const std::vector<Found>& found, const fs::path& lau
   if (std::string text = ReadTail(HubLogFile(), kLogTail); !text.empty()) report.Add("launcher/coreoflight.log", clean(text));
 
   if (!report.Write(report_path)) {
-    error = german ? "Konnte den Bericht nicht auf den Desktop schreiben" : "Could not write the report to the desktop";
+    error = german ? "Konnte den Bericht nicht auf den Desktop schreiben" : NL("Could not write the report to the desktop");
     return {};
   }
   // The notes' pictures beside it, <report>-1.png, -2.png, ...

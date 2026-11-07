@@ -14,7 +14,7 @@
 namespace coreoflight {
 
 struct HubSettings {
-  std::string language = "auto";  // "auto" (Windows' language), "german", "english"
+  std::string language = "auto";  // "auto" (the system's language), "german", "english", "dutch"
   bool figures_only_mine = true;  // the figure library opens on the owner's figures, not all
   bool figures_marks = true;      // Y marks a figure without a file as owned ("Hab ich")
   bool figures_progress = false;  // the library's tabs count the figures owned, "84/120" (#43)
@@ -22,6 +22,7 @@ struct HubSettings {
   int music_volume = 60;          // its loudness in percent, 0..100 (a colleague found it loud, 2026-10-23)
   bool animations = true;         // screens slide and fade in
   bool fullscreen = false;        // the window fills the screen (F11 / Alt+Enter switch it too)
+  bool unlock_all_figures = false;  // a blank file of every figure (unlock_figures.h)
   bool auto_backup = true;        // the saves copied at a game's start, end and every 60 minutes
   bool auto_update_games = true;  // a game's update found by the daily check installs without asking (#27)
   std::string handheld = "auto";  // handheld mode (#39): "auto" (handheld.h DetectHandheld), "on", "off"
@@ -41,6 +42,9 @@ std::filesystem::path HubSettingsFile();
 HubSettings LoadHubSettings();
 // Whether the menus are German with these settings.
 bool HubGerman(const HubSettings& settings);
+// Whether the launcher speaks Dutch (language "dutch", or "auto" on a Dutch system): German is off
+// then and the English texts go through lang_nl.h's NL().
+bool HubDutch(const HubSettings& settings);
 // The settings as pages for SettingsScreen (one page, the current values).
 std::shared_ptr<GameSettings> HubSettingsPages(const HubSettings& settings);
 // What the "Spiele-Ordner" row shows: the games folder, "Standard: ..." while none is chosen.

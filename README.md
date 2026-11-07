@@ -197,7 +197,10 @@ text file to your desktop with the latest logs and settings of every game, your 
 taken out. Open an [issue](https://github.com/tsapZ/SkylandersCoreOfLight/issues/new/choose) and
 drag that file in. After a crash the launcher offers it by itself.
 
-**Does it run on Linux?** The launcher works under Wine / Proton; the games are mainly tested on Windows.
+**Does it run on Linux?** Yes: there is a native Linux launcher, also for the Steam Deck
+(`CoreOfLight-linux-x86_64-<version>.zip`, see `installer/linux/README-linux.txt`). It sets up the
+Linux builds of the games (`<Repo>-linux-x86_64-<version>.tar.gz`) and adds itself and the games it
+installs to the desktop's application menu. The Windows launcher also works under Wine / Proton.
 
 **Why do the screenshots look so plain?** The games' artwork belongs to Activision, so the
 pictures here leave it out. The banner at the top is our own drawing.
@@ -251,6 +254,16 @@ cd SkylandersCoreOfLight
 cmake --preset release
 cmake --build --preset release
 ```
+
+Linux (SDL3, OpenGL, libcurl and OpenSSL development packages):
+
+```
+cmake --preset linux-release
+cmake --build --preset linux-release
+```
+
+The Steam Deck build (also for other distributions) is made in Valve's Steam Runtime SDK with
+`tools/build_steamdeck.sh` (Docker or Podman), which packs `dist/CoreOfLight-linux-x86_64-<version>.zip`.
 
 The pictures at the top of this page are drawn by `tools/make_banner.ps1`, the icon by
 `tools/make_icon.ps1`.

@@ -2,7 +2,7 @@
 
 // The chosen game's title music (music.cpp): a WAV the game recorded for the launcher
 // (skylanders-portal title_music.h), looped, faded in when its card is chosen and out when another
-// one is, through Windows' MCI (no audio library needed).
+// one is: on Windows through MCI (music.cpp), elsewhere through SDL3 (music_sdl.cpp).
 
 #include <filesystem>
 #include <string>

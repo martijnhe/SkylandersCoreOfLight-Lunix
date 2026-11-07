@@ -1,7 +1,9 @@
 #include "profiles.h"
 
+#ifdef _WIN32
 #include <windows.h>
 #include <shellapi.h>
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -12,6 +14,8 @@
 #include "games.h"
 #include "portal/data_folder.h"
 #include "portal/figure_file.h"
+#include "platform.h"
+#include "lang_nl.h"
 
 namespace coreoflight {
 namespace {
@@ -92,7 +96,7 @@ bool WriteIniValues(const fs::path& path, const std::vector<std::pair<std::strin
     for (const std::string& line : lines) out << line << "\r\n";
     if (!out) return false;
   }
-  return MoveFileExW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+  return platform::ReplaceFile(temp, path);
 }
 
 bool IsFigureFile(const fs::path& p) {
@@ -111,7 +115,7 @@ std::vector<Profile> LoadProfiles(bool german) {
   std::vector<Profile> profiles;
   Profile main;
   main.name = get("main_name");
-  if (main.name.empty()) main.name = german ? "Hauptprofil" : "Main profile";
+  if (main.name.empty()) main.name = german ? "Hauptprofil" : NL("Main profile");
   ParsePicture(get("main_picture"), main);
   main.root = SkylandersDir();
   profiles.push_back(main);
@@ -193,15 +197,7 @@ bool DeleteProfile(const Profile& p, bool to_recycle_bin) {
     if (ActiveProfile().id == p.id) WriteIniValues(ProfilesDir() / kListFile, {{"active", ""}});
     return true;
   }
-  // SHFileOperation wants the paths ended by two null characters.
-  std::wstring from = p.root.wstring();
-  from.push_back(L'\0');
-  from.push_back(L'\0');
-  SHFILEOPSTRUCTW op = {};
-  op.wFunc = FO_DELETE;
-  op.pFrom = from.c_str();
-  op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
-  if (SHFileOperationW(&op) != 0 || op.fAnyOperationsAborted) return false;
+  if (!platform::MoveToTrash(p.root)) return false;
   if (ActiveProfile().id == p.id) WriteIniValues(ProfilesDir() / kListFile, {{"active", ""}});
   return true;
 }
@@ -227,10 +223,7 @@ uint64_t LastSaved(const Profile& p, const fs::path& exe) {
   for (fs::recursive_directory_iterator it(saves, ec), end; it != end; it.increment(ec)) {
     if (ec) break;
     if (!it->is_regular_file(ec)) continue;
-    WIN32_FILE_ATTRIBUTE_DATA data;
-    if (!GetFileAttributesExW(it->path().c_str(), GetFileExInfoStandard, &data)) continue;
-    const FILETIME& t = data.ftLastWriteTime;
-    newest = std::max(newest, uint64_t(t.dwHighDateTime) << 32 | t.dwLowDateTime);
+    newest = std::max(newest, platform::FileWriteTime(it->path()));
   }
   return newest;
 }
@@ -286,7 +279,7 @@ int CopyFigures(const Profile& from, const Profile& to, bool as_new) {
     if (ec) break;
     if (!it->is_regular_file(ec) || !IsFigureFile(it->path())) continue;
     // The games' own copies of a figure before writing to it are not figures of their own.
-    if (it->path().wstring().find(L"\\real\\") != std::wstring::npos) continue;
+    if (std::find(it->path().begin(), it->path().end(), fs::path("real")) != it->path().end()) continue;
     std::error_code rel_ec;
     const fs::path dest = target / fs::relative(it->path(), source, rel_ec);
     if (rel_ec || fs::exists(dest, rel_ec)) continue;
@@ -300,14 +293,17 @@ int CopyFigures(const Profile& from, const Profile& to, bool as_new) {
   return copied;
 }
 
-std::wstring ProfileArguments(const fs::path& exe) {
+std::vector<std::string> ProfileArguments(const fs::path& exe) {
   const Profile& p = ActiveProfile();
   // The main profile is the games' own default, unless the launcher runs on a copy (--documents)
   // or keeps its data portable (#47): a game set up on this PC finds no portable-data.txt by itself.
   if (IsMainProfile(p) && !DocumentsMoved() && skylanders::PortableFolder().empty()) return {};
   const fs::path name = GameFolderName(exe);
-  return L" \"--user_data_root=" + (p.root / name).wstring() + L"\" \"--cache_root=" +
-         (SkylandersDir() / name / "cache").wstring() + L"\"";
+  auto utf8 = [](const fs::path& path) {
+    const std::u8string u8 = path.u8string();
+    return std::string(u8.begin(), u8.end());
+  };
+  return {"--user_data_root=" + utf8(p.root / name), "--cache_root=" + utf8(SkylandersDir() / name / "cache")};
 }
 
 }  // namespace coreoflight
