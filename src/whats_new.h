@@ -12,10 +12,10 @@ struct WhatsNewLine {
 };
 
 inline constexpr WhatsNewLine kWhatsNew[] = {
-    {"The settings only ask to save after a real change.",
-     "Die Einstellungen fragen nur noch nach echten \xC3\x84nderungen, ob du speichern willst."},
-    {"After a crash, the log says where it happened.",
-     "Nach einem Absturz steht im Log, wo er passiert ist."},
+    {"Runs on Linux and the Steam Deck, also as one AppImage file.",
+     "L\xC3\xA4uft unter Linux und auf dem Steam Deck, auch als eine AppImage-Datei."},
+    {"Dutch: the launcher, and Nederlands in every game's language setting.",
+     "Niederl\xC3\xA4ndisch: der Launcher und Nederlands in der Spracheinstellung jedes Spiels."},
 };
 
 }  // namespace coreoflight
