@@ -49,8 +49,8 @@ releases; what it adds:
   page, built in Valve's Steam Runtime so they start on SteamOS. They open in fullscreen and work
   with the Deck's controls.
 - **Dutch (Nederlands)** in the launcher, and as a game language for the discs that have it.
-- **The French / Dutch SuperChargers disc:** it is another build of the game, run by
-  SuperChargersRecomp's `fr-nl-disc` branch.
+- **The French / Dutch SuperChargers disc:** it is another build of the game, so SuperChargers
+  built with that disc in `rom/` runs it, with Dutch.
 - **The games' Linux builds:** the launcher installs `<Repo>-linux-x86_64-<version>.tar.gz`
   archives instead of Windows setups and adds the games to the desktop's application menu.
 
@@ -156,7 +156,7 @@ figures should go too.
 | **Giants** (2012) | [GiantsRecomp](https://github.com/tsapZ/GiantsRecomp) | the intro and Chapter 1; real 5.1 sound |
 | **Swap Force** (2013) | [SwapForceRecomp](https://github.com/tsapZ/SwapForceRecomp) | the tutorial and Woodburrow; swappers, real USB portals |
 | **Trap Team** (2014) | [TrapTeamRecomp](https://github.com/tsapZ/TrapTeamRecomp) | Chapter 1 and the Academy, with traps and villains |
-| **SuperChargers** (2015) | [SuperChargersRecomp](https://github.com/tsapZ/SuperChargersRecomp) | the first level and the ship; the European En/De and Es/It discs, and the Fr/Nl one (with Dutch) from the `fr-nl-disc` build |
+| **SuperChargers** (2015) | [SuperChargersRecomp](https://github.com/tsapZ/SuperChargersRecomp) | the first level and the ship; the European En/De and Es/It discs, and the Fr/Nl one (with Dutch) in a build made from it |
 | **Imaginators** (2016) | [ImaginatorsRecomp](https://github.com/tsapZ/ImaginatorsRecomp) | the first level; English, German or French from your PS3 disc |
 
 None of them has been played to the end yet. Each one runs on its own as well; the launcher just

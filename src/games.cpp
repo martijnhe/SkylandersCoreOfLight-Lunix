@@ -70,7 +70,7 @@ const std::vector<Game> kGames = {
     {"superchargers", "SuperChargers", "SuperChargers", 2015, COREOFLIGHT_GAME_EXE("superchargersrecompiled"),
      "SuperChargersRecomp", "SuperChargers Recompiled",
      // The European English / German disc and the Spanish / Italian one (the same build), and the
-     // French / Dutch one (another build: SuperChargersRecomp's fr-nl-disc branch runs it).
+     // French / Dutch one (another build: SuperChargersRecomp built from that disc runs it).
      "02ff6672d460c9aaa54e69d584af67a7138c6c93cde5e04b0da4284207be7c61,"
      "02846647633e93c627e74b92d3ad63a90e1504546958fc8d81e28ac65de1f9bc,"
      "82450000:3140330d024070a570409f8ebb651593ffdf5e038495721f2ca3538dbecd4671,"
