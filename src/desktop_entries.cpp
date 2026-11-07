@@ -1,5 +1,7 @@
 #include "desktop_entries.h"
 
+#include <cstdlib>
+
 #ifndef _WIN32
 
 #include <fstream>
@@ -99,10 +101,25 @@ void UpdateDesktopEntries(const std::vector<Found>& found, const std::vector<std
   // The launcher's icon (package_linux.sh puts it next to the program).
   fs::path launcher_icon = launcher_dir / "coreoflight.png";
   if (!fs::is_regular_file(launcher_icon, ec)) launcher_icon.clear();
-  if (packaged) {
+  fs::path program = platform::ExePath(), program_dir = launcher_dir;
+  // As an AppImage (package_appimage.sh) the program runs from a mount that is gone once it quits:
+  // the entry starts the AppImage file itself ($APPIMAGE, set by its runtime), and the icon is
+  // copied out to ~/.local/share/icons.
+  const char* appimage = std::getenv("APPIMAGE");
+  if (appimage && *appimage) {
+    program = fs::path(appimage);
+    program_dir = program.parent_path();
+    if (!launcher_icon.empty()) {
+      const fs::path kept = apps.parent_path() / "icons" / "coreoflight.png";
+      fs::create_directories(kept.parent_path(), ec);
+      fs::copy_file(launcher_icon, kept, fs::copy_options::overwrite_existing, ec);
+      launcher_icon = ec ? fs::path() : kept;
+    }
+  }
+  if (packaged || (appimage && *appimage)) {
     Put(apps / (std::string(kPrefix) + ".desktop"),
-        Entry("Skylanders: Core of Light", "The launcher for the recompiled Skylanders games", platform::ExePath(),
-              launcher_dir, launcher_icon));
+        Entry("Skylanders: Core of Light", "The launcher for the recompiled Skylanders games", program,
+              program_dir, launcher_icon));
   }
   const auto& games = AllGames();
   for (size_t i = 0; i < games.size(); ++i) {
