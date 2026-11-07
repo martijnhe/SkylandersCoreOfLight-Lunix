@@ -4,15 +4,17 @@
 
 <p>
 For Spyro's Adventure, Giants, Swap Force, Trap Team, SuperChargers and Imaginators.<br>
-Native Windows ports, no emulator, made for a controller.
+Native Windows ports, no emulator, made for a controller.<br>
+<b>This fork adds Linux and the Steam Deck.</b>
 </p>
 
 <p>
-<a href="https://github.com/tsapZ/SkylandersCoreOfLight/releases"><img src=".github/images/download.png" alt="Download for Windows" width="300" height="56"></a>
+<a href="https://github.com/tsapZ/SkylandersCoreOfLight/releases"><img src=".github/images/download.png" alt="Download for Windows" width="300" height="56"></a><br>
+<a href="https://github.com/martijnhe/SkylandersCoreOfLight-Lunix/releases"><b>Download for Linux and the Steam Deck</b></a>
 </p>
 
 <p>
-<sub><a href="#screenshots">Screenshots</a> · <a href="#getting-started">Getting started</a> · <a href="#the-six-games">The games</a> · <a href="#controls">Controls</a> · <a href="#help">Help</a> · <a href="https://github.com/tsapZ/SkylandersCoreOfLight/issues/new/choose">Report a problem</a></sub>
+<sub><a href="#linux-and-the-steam-deck">Linux and Steam Deck</a> · <a href="#screenshots">Screenshots</a> · <a href="#getting-started">Getting started</a> · <a href="#the-six-games">The games</a> · <a href="#controls">Controls</a> · <a href="#help">Help</a> · <a href="https://github.com/tsapZ/SkylandersCoreOfLight/issues/new/choose">Report a problem</a></sub>
 </p>
 
 </div>
@@ -31,6 +33,53 @@ asks for a Skylander, the portal menu opens by itself.
 - **Sharper and smoother than the console:** up to 3x the console's 720p, 60 FPS and more, a settings menu in every game. On a Ryzen 5 5600 with a Radeon RX 6800 XT (32 GB RAM, Windows 11) all six hold 60 FPS at 2x (1440p); without the cap their hubs run at 87 to 142 FPS at 2x.
 - **Native Windows ports, not an emulator:** the games' code is recompiled for the PC. No game data comes with it; the launcher takes it from your own Xbox 360 discs.
 - **Everything in one place:** your figures, saves and achievements, with older versions to go back to.
+
+<br>
+
+## Linux and the Steam Deck
+
+This fork ([martijnhe/SkylandersCoreOfLight-Lunix](https://github.com/martijnhe/SkylandersCoreOfLight-Lunix),
+branch `linux-port`) is upstream's launcher with a native Linux port. It follows upstream's
+releases; what it adds:
+
+- **A Linux launcher** (SDL3 and OpenGL instead of Win32 and Direct3D) with the same pages,
+  figures, saves and achievements.
+- **Steam Deck builds:** `CoreOfLight-<version>-x86_64.AppImage` and
+  `CoreOfLight-linux-x86_64-<version>.zip` on the [Releases](https://github.com/martijnhe/SkylandersCoreOfLight-Lunix/releases)
+  page, built in Valve's Steam Runtime so they start on SteamOS. They open in fullscreen and work
+  with the Deck's controls.
+- **Dutch (Nederlands)** in the launcher, and as a game language for the discs that have it.
+- **The French / Dutch SuperChargers disc:** it is another build of the game, run by
+  SuperChargersRecomp's `fr-nl-disc` branch.
+- **The games' Linux builds:** the launcher installs `<Repo>-linux-x86_64-<version>.tar.gz`
+  archives instead of Windows setups and adds the games to the desktop's application menu.
+
+**On a Linux PC:** download the AppImage, make it executable and start it, or unpack the ZIP into
+a folder such as `~/Applications/CoreOfLight` and start `coreoflight`.
+
+**On the Steam Deck:**
+
+1. In Desktop Mode, copy the AppImage (or the unpacked ZIP) to the internal drive or the microSD
+   card.
+2. In Steam: *Games > Add a Non-Steam Game to My Library > Browse*, and pick it.
+3. Back in Gaming Mode, start it from the library. No launch options are needed.
+
+**The games on Linux.** The game ports release Windows setups only, so each game is built from
+its own repository and packed for the launcher. The archive holds code recompiled from your disc,
+so it is for your own devices only:
+
+```
+# in a game's checkout, with its disc extracted to rom/
+cmake --preset linux-amd64-release && cmake --build --preset linux-amd64-release
+tools/package_linux_game.sh <game checkout> ~/Applications/CoreOfLight/games   # for this PC
+tools/build_game_steamdeck.sh <game checkout> <out folder>                      # for a Steam Deck
+```
+
+The launcher finds archives in `games/` next to itself. A build for this PC needs this PC's C
+library, which is often newer than SteamOS's; `build_game_steamdeck.sh` builds in an Ubuntu 24.04
+container instead and puts the C++ runtime next to the game. With the ZIP, a game folder placed next to
+the launcher (`CoreOfLight/<game name>/`, the program with its `rom/` folder) is found without
+installing.
 
 > Unofficial fan project. Not affiliated with or endorsed by Activision, Toys for Bob or Vicarious
 > Visions. It ships no game data and no artwork: the pictures, texts and music it shows come from
@@ -208,8 +257,8 @@ drag that file in. After a crash the launcher offers it by itself.
 
 **Does my Wii or PS3 copy work?** No: these are the Xbox 360 games, set up from your own Xbox 360 discs (each game's page says which disc).
 
-**Does it run on Linux?** Yes: there is a native Linux launcher, also for the Steam Deck
-(`CoreOfLight-linux-x86_64-<version>.zip`, see `installer/linux/README-linux.txt`). It sets up the
+**Does it run on Linux?** Yes, with this fork: a native Linux launcher, also for the Steam Deck
+([Linux and the Steam Deck](#linux-and-the-steam-deck), `installer/linux/README-linux.txt`). It sets up the
 Linux builds of the games (`<Repo>-linux-x86_64-<version>.tar.gz`) and adds itself and the games it
 installs to the desktop's application menu. The Windows launcher also works under Wine / Proton.
 
